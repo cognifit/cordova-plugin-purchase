@@ -333,6 +333,8 @@ store.sandbox = false;
 /// ## Constants
 ///
 
+/*///*/     store.billingKey = 'BILLING_KEY';
+
 ///
 /// ### product types
 ///
