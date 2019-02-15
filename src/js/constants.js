@@ -5,6 +5,8 @@
 /// ## Constants
 ///
 
+/*///*/     store.billingKey = 'BILLING_KEY';
+
 ///
 /// ### product types
 ///

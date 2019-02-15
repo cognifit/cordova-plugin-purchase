@@ -17,7 +17,7 @@ var InAppBilling = function () {
 
 InAppBilling.prototype.init = function (success, fail, options, skus) {
 	if (!options)
-        options = {};
+		options = {};
 
 	this.options = {
 		showLog: options.showLog !== false
@@ -49,13 +49,15 @@ InAppBilling.prototype.init = function (success, fail, options, skus) {
 		}
 	}
 
+	var args = [store.billingKey];
 	if (hasSKUs) {
-		cordova.exec(success, errorCb(fail), "InAppBillingPlugin", "init", [skus]);
+		args.push(skus);
     }
 	else {
-        //No SKUs
-		cordova.exec(success, errorCb(fail), "InAppBillingPlugin", "init", []);
-    }
+		args.push([]);
+	}
+	
+	cordova.exec(success, errorCb(fail), "InAppBillingPlugin", "init", args);
 };
 InAppBilling.prototype.getPurchases = function (success, fail) {
 	if (this.options.showLog) {

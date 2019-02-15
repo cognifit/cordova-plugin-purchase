@@ -54,8 +54,10 @@ public class InAppBillingPlugin extends CordovaPlugin {
 			// Action selector
 			if ("init".equals(action)) {
 				final List<String> sku = new ArrayList<String>();
+				String billingKey = "";
 				if(data.length() > 0){
-					JSONArray jsonSkuList = new JSONArray(data.getString(0));
+					billingKey = data.getString(0);
+					JSONArray jsonSkuList = new JSONArray(data.getString(1));
 					int len = jsonSkuList.length();
 					Log.d(TAG, "Num SKUs Found: "+len);
 	   			 for (int i=0;i<len;i++){
@@ -64,7 +66,7 @@ public class InAppBillingPlugin extends CordovaPlugin {
 	   			 }
 				}
 				// Initialize
-				init(sku);
+				init(billingKey, sku);
 			} else if ("getPurchases".equals(action)) {
 				// Get the list of purchases
 				JSONArray jsonSkuList = new JSONArray();
@@ -141,34 +143,13 @@ public class InAppBillingPlugin extends CordovaPlugin {
 		return isValidAction;
 	}
 
-    private String getPublicKey() {
-        int billingKeyFromParam = cordova.getActivity().getResources().getIdentifier("billing_key_param", "string", cordova.getActivity().getPackageName());
-        String ret = "";
-
-        if (billingKeyFromParam > 0) {
-            ret = cordova.getActivity().getString(billingKeyFromParam);
-            if (ret.length() > 0) {
-                return ret;
-            }
-        }
-
-        int billingKey = cordova.getActivity().getResources().getIdentifier("billing_key", "string", cordova.getActivity().getPackageName());
-        return cordova.getActivity().getString(billingKey);
-    }
-
 	// Initialize the plugin
-	private void init(final List<String> skus){
+	private void init(final String billingKey, final List<String> skus){
 		Log.d(TAG, "init start");
-		// Some sanity checks to see if the developer (that's you!) really followed the
-        // instructions to run this plugin
-        String base64EncodedPublicKey = getPublicKey();
-
-	 	if (base64EncodedPublicKey.contains("CONSTRUCT_YOUR"))
-	 		throw new RuntimeException("Please configure your app's public key.");
-
-	 	// Create the helper, passing it our context and the public key to verify signatures with
+		
+		// Create the helper, passing it our context and the public key to verify signatures with
         Log.d(TAG, "Creating IAB helper.");
-        mHelper = new IabHelper(cordova.getActivity().getApplicationContext(), base64EncodedPublicKey);
+        mHelper = new IabHelper(cordova.getActivity().getApplicationContext(), billingKey);
 
         // enable debug logging (for a production application, you should set this to false).
         mHelper.enableDebugLogging(ENABLE_DEBUG_LOGGING);
