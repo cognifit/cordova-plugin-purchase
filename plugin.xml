@@ -34,8 +34,8 @@ SOFTWARE.
         <engine name="cordova" version=">=6.0.0" />
         <engine name="cordova-android" version=">=4.0.0" />
     </engines>
-    <repo>https://github.com/j3k0/cordova-plugin-purchase.git</repo>
-    <issue>https://github.com/j3k0/cordova-plugin-purchase/issues</issue>
+    <repo>https://github.com/cognifit/cordova-plugin-purchase.git</repo>
+    <issue>https://github.com/cognifit/cordova-plugin-purchase/issues</issue>
 
 	<license>MIT</license>
     <keywords>cordova,phonegap,purchase,storekit,ios,android,play,appstore,windows</keywords>
