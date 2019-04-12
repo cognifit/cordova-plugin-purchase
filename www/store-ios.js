@@ -3021,8 +3021,14 @@ function storekitError(errorCode, errorText, options) {
                 transaction: null,
                 state: store.VALID
             });
+            p.trigger("error", [new store.Error({
+                code: store.ERR_PAYMENT_CANCELLED,
+                message: errorText
+            }), p]);
         }
         // but a cancelled order isn't an error.
+	// while a cancelled order isn't an error we want to receice a callback
+	// about it so we know the async operation has finished
         return;
     }
 
