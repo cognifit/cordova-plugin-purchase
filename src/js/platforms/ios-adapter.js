@@ -1,6 +1,6 @@
 /*global storekit */
 (function() {
-"use strict";
+
 
 //! ## Reacting to product state changes
 //!
@@ -38,7 +38,10 @@ store.when("requested", function(product) {
             }), product]);
             return;
         }
-        storekit.purchase(product.id, 1);
+        var a = product.additionalData || {};
+        var applicationUsername = a.applicationUsername || store.getApplicationUsername(product);
+        var hashedUsername = applicationUsername ? store.utils.md5(applicationUsername) : '';
+        storekit.purchase(product.id, 1, hashedUsername, a.discount);
     });
 });
 
@@ -48,7 +51,9 @@ store.when("requested", function(product) {
 //!
 store.when("finished", function(product) {
     store.log.debug("ios -> finishing " + product.id + " (a " + product.type + ")");
-    storekitFinish(product);
+    if (product.type !== store.APPLICATION) {
+        storekitFinish(product);
+    }
     if (product.type === store.CONSUMABLE || product.type === store.NON_RENEWING_SUBSCRIPTION || product.expired) {
         product.set("state", store.VALID);
         setOwned(product.id, false);
@@ -60,7 +65,7 @@ store.when("finished", function(product) {
 
 function storekitFinish(product) {
     if (product.type === store.CONSUMABLE || product.type === store.NON_RENEWING_SUBSCRIPTION) {
-        var transactionId = (product.transaction && product.transaction.id) || storekit.transactionForProduct[product.id];
+        var transactionId = product.transaction && product.transaction.id || storekit.transactionForProduct[product.id];
         if (transactionId) {
             storekit.finish(transactionId);
             // TH 08/03/2016: Remove the finished transaction from product.transactions.
@@ -161,6 +166,7 @@ function storekitInit() {
     storekit.init({
         debug:    store.verbosity >= store.DEBUG ? true : false,
         autoFinish: store.autoFinishTransactions,
+        disableHostedContent: store.disableHostedContent,
         error:    storekitError,
         purchase: storekitPurchased,
         purchasing: storekitPurchasing,
@@ -209,6 +215,34 @@ function storekitLoad() {
     storekit.load(products, storekitLoaded, storekitLoadFailed);
 }
 
+function updateValidProducts(validProducts) {
+    var p;
+    for (var i = 0; i < validProducts.length; ++i) {
+        p = store.products.byId[validProducts[i].id];
+        var v = validProducts[i];
+        p.set({
+            title: v.title,
+            description: v.description,
+            price: v.price,
+            priceMicros: v.priceMicros,
+            currency: v.currency,
+            countryCode: v.countryCode,
+            introPrice: v.introPrice,
+            introPriceMicros: v.introPriceMicros,
+            introPriceNumberOfPeriods: v.introPriceNumberOfPeriods,
+            introPriceSubscriptionPeriod: v.introPriceSubscriptionPeriod,
+            introPricePeriod: v.introPricePeriod,
+            introPricePeriodUnit: v.introPricePeriodUnit,
+            introPricePaymentMode: v.introPricePaymentMode,
+            billingPeriod: v.billingPeriod,
+            billingPeriodUnit: v.billingPeriodUnit,
+            discounts: v.discounts,
+            group: v.group,
+        });
+        p.trigger("updated");
+    }
+}
+
 //! ### <a name="storekitLoaded"></a> *storekitLoaded()*
 //!
 //! Update the `store`'s product definitions when they have been loaded.
@@ -220,20 +254,13 @@ function storekitLoad() {
 //!
 function storekitLoaded(validProducts, invalidProductIds) {
     store.log.debug("ios -> products loaded");
+    updateValidProducts(validProducts);
     var p;
     for (var i = 0; i < validProducts.length; ++i) {
         p = store.products.byId[validProducts[i].id];
         store.log.debug("ios -> product " + p.id + " is valid (" + p.alias + ")");
         store.log.debug("ios -> owned? " + p.owned);
-        p.set({
-            title: validProducts[i].title,
-            price: validProducts[i].price,
-            priceMicros: validProducts[i].priceMicros,
-            description: validProducts[i].description,
-            currency: validProducts[i].currency,
-            countryCode: validProducts[i].countryCode,
-            state: store.VALID
-        });
+        p.set("state", store.VALID);
         p.trigger("loaded");
         if (isOwned(p.id)) {
             if (p.type === store.NON_CONSUMABLE)
@@ -254,7 +281,8 @@ function storekitLoaded(validProducts, invalidProductIds) {
     setTimeout(function() {
         loading = false;
         loaded = true;
-        store.ready(true);
+        var ready = store.ready.bind(store, true);
+        store.update(ready, ready, true);
     }, 1);
 }
 
@@ -292,9 +320,11 @@ function storekitRefreshReceipts(callback) {
     });
 }
 
-store.when("expired", function() {
-    storekitRefreshReceipts();
-});
+// The better default is now for validation services to use the
+// `latest_receipt_info` field.
+// store.when("expired", function() {
+//     storekitRefreshReceipts();
+// });
 
 //! ### <a name="storekitPurchasing"></a> *storekitPurchasing()*
 //!
@@ -322,7 +352,7 @@ function storekitPurchasing(productId) {
 //! It will set the product state to `APPROVED` and associates the product
 //! with the order's transaction identifier.
 //!
-function storekitPurchased(transactionId, productId) {
+function storekitPurchased(transactionId, productId, originalTransactionId) {
     store.ready(function() {
         var product = store.get(productId);
         if (!product) {
@@ -346,6 +376,9 @@ function storekitPurchased(transactionId, productId) {
             type: 'ios-appstore',
             id:   transactionId
         };
+        if(originalTransactionId){
+            product.transaction.original_transaction_id = originalTransactionId;
+        }
         if (!product.transactions)
             product.transactions = [];
         product.transactions.push(transactionId);
@@ -383,22 +416,18 @@ function storekitError(errorCode, errorText, options) {
 
     // a purchase was cancelled by the user:
     // - trigger the "cancelled" event
-    // - set the product back to the VALID state
+    // - set the product back to its original state
     if (errorCode === storekit.ERR_PAYMENT_CANCELLED) {
         p = store.get(options.productId);
         if (p) {
             p.trigger("cancelled");
-            p.set({
-                transaction: null,
-                state: store.VALID
-            });
-            p.trigger("error", [new store.Error({
-                code: store.ERR_PAYMENT_CANCELLED,
-                message: errorText
-            }), p]);
+            p.pop();
+            // p.set({
+            //     transaction: null,
+            //     state: store.VALID
+            // });
         }
-        // while a cancelled order isn't an error we want to receice a callback
-        // about it so we know the async operation has finished
+        // but a cancelled order isn't an error.
         return;
     }
 
@@ -413,10 +442,11 @@ function storekitError(errorCode, errorText, options) {
             code:    errorCode,
             message: errorText
         }), p]);
-        p.set({
-            transaction: null,
-            state: store.VALID
-        });
+        p.pop();
+        // p.set({
+        //     transaction: null,
+        //     state: store.VALID
+        // });
     }
 
     store.error({
@@ -429,36 +459,88 @@ store.manageSubscriptions = function() {
     storekit.manageSubscriptions();
 };
 
+store.manageBilling = function() {
+    storekit.manageBilling();
+};
+
 // Restore purchases.
 // store.restore = function() {
 // };
 store.when("re-refreshed", function() {
     storekit.restore();
-    storekit.refreshReceipts(function(data) {
-        // What the point of this?
-        // Why create a product whose ID equals the application bundle ID (?)
-        // Is it just to trigger force a validation of the appStoreReceipt?
-        if (data) {
-            var p = data.bundleIdentifier ? store.get(data.bundleIdentifier) : null;
-            if (!p) {
-                p = new store.Product({
-                    id:    data.bundleIdentifier || "application data",
-                    alias: "application data",
-                    type:  store.NON_CONSUMABLE
-                });
-                store.register(p);
-            }
-            p.version = data.bundleShortVersion;
-            p.transaction = {
-                type: 'ios-appstore',
-                appStoreReceipt: data.appStoreReceipt,
-                signature: data.signature
-            };
-            p.trigger("loaded");
-            p.set('state', store.APPROVED);
-        }
+    storekit.refreshReceipts(function(obj) {
+        storekitSetAppProductFromReceipt(obj);
+        store.update();
     });
 });
+
+// Create a product whose ID equals the application bundle ID.
+// Use it to force a validation of the appStoreReceipt.
+function storekitSetAppProductFromReceipt(data) {
+    if (data) {
+        var p = data.bundleIdentifier ? store.get(data.bundleIdentifier) : null;
+        if (!p) {
+            p = new store.Product({
+                id:    data.bundleIdentifier || "_",
+                alias: store.APPLICATION,
+                type:  store.APPLICATION,
+            });
+            store.register(p);
+            p.title = 'Application Bundle';
+        }
+        p.transaction = {
+            type: 'ios-appstore',
+            appStoreReceipt: data.appStoreReceipt,
+            signature: data.signature
+        };
+        p.version = data.bundleShortVersion;
+        p.trigger("loaded");
+        if (p.state !== store.OWNED && p.state !== store.APPROVED) {
+            p.set('state', store.APPROVED);
+        }
+        return p;
+    }
+}
+
+function syncWithAppStoreReceipt(appStoreReceipt) {
+    store.log.debug("syncWithAppStoreReceipt");
+    store.log.debug(JSON.stringify(appStoreReceipt));
+    if (!appStoreReceipt)
+        return;
+    var lastTransactions = {};
+    var isSubscriber = false;
+    var usedIntroOffer = false;
+    if (appStoreReceipt && appStoreReceipt.in_app && appStoreReceipt.in_app.forEach) {
+        appStoreReceipt.in_app.forEach(function(transaction) {
+            lastTransactions[transaction.product_id] = transaction;
+        });
+    }
+    Object.values(lastTransactions).forEach(function(transaction) {
+        if (transaction.expires_date_ms) {
+            isSubscriber = true;
+        }
+        if (transaction.is_in_intro_offer_period === 'true') {
+            usedIntroOffer = true;
+        }
+        var p = store.get(transaction.product_id);
+        if (!p) return;
+        transaction.type = 'ios-appstore';
+        store._extractTransactionFields(p, transaction);
+    });
+    store.products.forEach(function(product) {
+        if (product.type === store.PAID_SUBSCRIPTION) {
+            if (isSubscriber && product.discounts) {
+                product.discounts.forEach(function(discount) {
+                    discount.eligible = true;
+                });
+            }
+            if (usedIntroOffer) {
+                product.set('ineligibleForIntroPrice', true);
+            }
+            product.trigger("updated");
+        }
+    });
+}
 
 function storekitRestored(originalTransactionId, productId) {
     store.log.info("ios -> restored purchase " + productId);
@@ -511,28 +593,36 @@ store._refreshForValidation = function(callback) {
     storekitRefreshReceipts(callback);
 };
 
+var triggerLoadReceiptsError = store.utils.debounce(function() {
+    store.error(new store.Error({
+        code: store.ERR_LOAD_RECEIPTS,
+        message: "Cannot validate purchases." +
+            " Ask user to perform to restore purchases (you call store.refresh())." +
+            " This will probably ask user to enter appStore password."
+    }));
+}, 300);
+
 // Load receipts required by server-side validation of purchases.
 store._prepareForValidation = function(product, callback) {
     var nRetry = 0;
     function loadReceipts() {
-        storekit.setAppStoreReceipt(null);
-        storekit.loadReceipts(function(r) {
+        storekit.loadReceipts(function(data) {
             if (!product.transaction) {
                 product.transaction = {
                     type: 'ios-appstore'
                 };
             }
-            product.transaction.appStoreReceipt = r.appStoreReceipt;
-            if (product.transaction.id)
-                product.transaction.transactionReceipt = r.forTransaction(product.transaction.id);
-            if (!product.transaction.appStoreReceipt && !product.transaction.transactionReceipt) {
+            storekitSetAppProductFromReceipt(data);
+            product.transaction.appStoreReceipt = data.appStoreReceipt;
+            if (!product.transaction.appStoreReceipt) {
                 nRetry ++;
                 if (nRetry < 2) {
                     setTimeout(loadReceipts, 500);
                     return;
                 }
                 else if (nRetry === 2) {
-                    storekit.refreshReceipts(loadReceipts);
+                    // Fail and ask user to do "Restore Purchases"
+                    triggerLoadReceiptsError();
                     return;
                 }
             }
@@ -541,6 +631,52 @@ store._prepareForValidation = function(product, callback) {
     }
     loadReceipts();
 };
+
+store.update = function(successCb, errorCb, skipLoad) {
+    store.log.debug("update()");
+    if (!skipLoad) {
+        storekit.load(store.products.map(function(p) { return p.id; }), updateValidProducts);
+    }
+    storekit.loadReceipts(function(data) {
+        if (data && data.appStoreReceipt) {
+            var p = storekitSetAppProductFromReceipt(data);
+            if (p) {
+                store.once(p.id, 'verified', onVerified);
+                store.once(p.id, 'unverified', onUnverified);
+                p.set("state", store.APPROVED);
+                p.verify();
+                return;
+            }
+        }
+        if (errorCb) {
+            errorCb(store.ERR_LOAD_RECEIPTS, 'No appStoreReceipt, Call store.refresh()');
+        }
+
+        function onVerified() {
+            store.once.unregister(onUnverified);
+            syncWithAppStoreReceipt(p.transaction);
+            if (successCb) {
+                successCb();
+            }
+        }
+        function onUnverified() {
+            store.once.unregister(onVerified);
+            if (errorCb) {
+                errorCb(store.ERR_VERIFICATION_FAILED, 'Invalid appStoreReceipt');
+            }
+        }
+    }, errorCb);
+};
+
+setInterval(function() {
+    var now = +new Date();
+    var expired = store.products.find(function(product) {
+        return product.owned && now > +product.expiryDate + 60000;
+    });
+    if (expired) {
+        store.update();
+    }
+}, 60000);
 
 //!
 //! ## Persistance of the *OWNED* status

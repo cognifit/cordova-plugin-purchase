@@ -1,5 +1,5 @@
 (function() {
-'use strict';
+
 
 function defer(thisArg, cb, delay) {
     setTimeout(function() {
@@ -31,8 +31,12 @@ store.Product = function(options) {
 
     ///  - `product.type` - Family of product, should be one of the defined [product types](#product-types).
     var type = this.type = options.type || null;
-    if (type !== store.CONSUMABLE && type !== store.NON_CONSUMABLE && type !== store.PAID_SUBSCRIPTION && type !== store.FREE_SUBSCRIPTION && type !== store.NON_RENEWING_SUBSCRIPTION)
+    if (type !== store.CONSUMABLE && type !== store.NON_CONSUMABLE && type !== store.PAID_SUBSCRIPTION && type !== store.FREE_SUBSCRIPTION && type !== store.NON_RENEWING_SUBSCRIPTION && type !== store.APPLICATION)
         throw new TypeError("Invalid product type");
+
+    ///  - `product.group` - Name of the group your subscription product is a member of (default to `"default"`). If you don't set anything, all subscription will be members of the same group.
+    var defaultGroup = this.type === store.PAID_SUBSCRIPTION ? "default" : "";
+    this.group = options.group || defaultGroup;
 
     ///  - `product.state` - Current state the product is in (see [life-cycle](#life-cycle) below). Should be one of the defined [product states](#product-states)
     this.state = options.state || "";
@@ -43,7 +47,7 @@ store.Product = function(options) {
     ///  - `product.description` - Localized longer description
     this.description = options.description || options.localizedDescription || null;
 
-    ///  - `product.priceMicros` - Localized price, in micro-units (divide by 1000000 to get numeric price)
+    ///  - `product.priceMicros` - Price in micro-units (divide by 1000000 to get numeric price)
     this.priceMicros = options.priceMicros || null;
 
     ///  - `product.price` - Localized price, with currency symbol
@@ -68,6 +72,7 @@ store.Product = function(options) {
     this.loaded = options.loaded;
 
     ///  - `product.valid` - Product has been loaded and is a valid product
+    ///    - when product definitions can't be loaded from the store, you should display instead a warning like: "You cannot make purchases at this stage. Try again in a moment. Make sure you didn't enable In-App-Purchases restrictions on your phone."
     this.valid  = options.valid;
 
     ///  - `product.canPurchase` - Product is in a state where it can be purchased
@@ -75,6 +80,36 @@ store.Product = function(options) {
 
     ///  - `product.owned` - Product is owned
     this.owned = options.owned;
+
+    ///  - `product.introPrice` - Localized introductory price, with currency symbol
+    this.introPrice = options.introPrice || null;
+
+    ///  - `product.introPriceMicros` - Introductory price in micro-units (divide by 1000000 to get numeric price)
+    this.introPriceMicros = options.introPriceMicros || null;
+
+    ///  - `product.introPricePeriod` - Duration the introductory price is available (in period-unit)
+    this.introPricePeriod = options.introPricePeriod || null;
+    this.introPriceNumberOfPeriods = options.introPriceNumberOfPeriods || null; // legacy
+
+    ///  - `product.introPricePeriodUnit` - Period for the introductory price ("Day", "Week", "Month" or "Year")
+    this.introPricePeriodUnit = options.introPricePeriodUnit || null;
+    this.introPriceSubscriptionPeriod = options.introPriceSubscriptionPeriod || null; // legacy
+
+    ///  - `product.introPricePaymentMode` - Payment mode for the introductory price ("PayAsYouGo", "UpFront", or "FreeTrial")
+    this.introPricePaymentMode = options.introPricePaymentMode || null;
+
+    ///  - `product.ineligibleForIntroPrice` - True when a trial or introductory price has been applied to a subscription. Only available after [receipt validation](#validator). Available only on iOS
+    this.ineligibleForIntroPrice = options.ineligibleForIntroPrice || null;
+
+    /// - `product.discounts` - Array of discounts available for the product. Each discount exposes the following fields:
+    ///    - `id` - The discount identifier
+    ///    - `price` - Localized price, with currency symbol
+    ///    - `priceMicros` - Price in micro-units (divide by 1000000 to get numeric price)
+    ///    - `period` - Number of subscription periods
+    ///    - `periodUnit` - Unit of the subcription period ("Day", "Week", "Month" or "Year")
+    ///    - `paymentMode` - "PayAsYouGo", "UpFront", or "FreeTrial"
+    ///    - `eligible` - True if the user is deemed eligible for this discount by the platform
+    this.discounts = [];
 
     ///  - `product.downloading` - Product is downloading non-consumable content
     this.downloading = options.downloading;
@@ -87,6 +122,24 @@ store.Product = function(options) {
 
     ///  - `product.transaction` - Latest transaction data for this product (see [transactions](#transactions)).
     this.transaction = null;
+
+    ///  - `product.expiryDate` - Latest known expiry date for a subscription (a javascript Date)
+    ///  - `product.lastRenewalDate` - Latest date a subscription was renewed (a javascript Date)
+    ///  - `product.billingPeriod` - Duration of the billing period for a subscription, in the units specified by the `billingPeriodUnit` property.
+    ///  - `product.billingPeriodUnit` - Units of the billing period for a subscription. Possible values: Minute, Hour, Day, Week, Month, Year.
+    ///  - `product.trialPeriod` - Duration of the trial period for the subscription, in the units specified by the `trialPeriodUnit` property (windows only)
+    ///  - `product.trialPeriodUnit` - Units of the trial period for a subscription (windows only)
+
+	// Some more fields set by [Fovea.Billing](https://billing.fovea.cc) receipt validator.
+	//  - `product.isBillingRetryPeriod` -
+	//  - `product.isTrialPeriod` -
+	//  - `product.isIntroPeriod` -
+	//  - `product.discountId` -
+	//  - `product.priceConsentStatus` -
+	//  - `product.renewalIntent` -
+	//  - `product.renewalIntentChangeDate` -
+	//  - `product.purchaseDate` -
+	//  - `product.cancelationReason` -
 
     this.stateChanged();
 };
@@ -172,8 +225,8 @@ store.Product.prototype.verify = function() {
             }));
             var dataTransaction = getData(data, 'transaction');
             if (dataTransaction) {
-                that.transaction = Object.assign(that.transaction || {},
-                                                 dataTransaction);
+                that.transaction = Object.assign(that.transaction || {}, dataTransaction);
+                store._extractTransactionFields(that);
                 that.trigger("updated");
             }
             if (success) {
@@ -183,10 +236,38 @@ store.Product.prototype.verify = function() {
                 store.utils.callExternal('verify.success', successCb, that, data);
                 store.utils.callExternal('verify.done', doneCb, that);
                 that.trigger("verified");
+
+                // Process the list of products that are ineligible
+                // for introductory prices.
+                if (data && data.ineligible_for_intro_price &&
+                         data.ineligible_for_intro_price.forEach) {
+                    data.ineligible_for_intro_price.forEach(function(pid) {
+                        var p = store.get(pid);
+                        if (p) {
+                            p.set('ineligibleForIntroPrice', true);
+                            store.log.debug('verify -> ' + pid + ' ineligibleForIntroPrice:true');
+                        }
+                    });
+                    store.products.forEach(function(p) {
+                        if (p.ineligibleForIntroPrice &&
+                            (data.ineligible_for_intro_price.indexOf(p.id) < 0)) {
+                            p.set('ineligibleForIntroPrice', false);
+                            store.log.debug('verify -> ' + p.id + ' ineligibleForIntroPrice:false');
+                        }
+                    });
+                }
+                if (data && data.collection && data.collection.forEach) {
+                    data.collection.forEach(function(purchase) {
+                        var p = store.get(purchase.id);
+                        if (p) {
+                            p.set(purchase);
+                        }
+                    });
+                }
             }
             else {
                 store.log.debug("verify -> error: " + JSON.stringify(data));
-                var msg = (data && data.error && data.error.message ? data.error.message : '');
+                var msg = data && data.error && data.error.message ? data.error.message : '';
                 var err = new store.Error({
                     code: store.ERR_VERIFICATION_FAILED,
                     message: "Transaction verification failed: " + msg
@@ -238,12 +319,14 @@ store.Product.prototype.verify = function() {
 
     defer(this, function() {
         if (that.state !== store.APPROVED) {
-            var err = new store.Error({
-                code: store.ERR_VERIFICATION_FAILED,
-                message: "Product isn't in the APPROVED state"
-            });
-            store.error(err);
-            store.utils.callExternal('verify.error', errorCb, err);
+            if (that.type !== store.APPLICATION) {
+                var err = new store.Error({
+                    code: store.ERR_VERIFICATION_FAILED,
+                    message: "Product isn't in the APPROVED state"
+                });
+                store.error(err);
+                store.utils.callExternal('verify.error', errorCb, err);
+            }
             store.utils.callExternal('verify.done', doneCb, that);
             return;
         }
@@ -277,6 +360,42 @@ store.Product.prototype.verify = function() {
     ///
 
     return ret;
+};
+
+store._extractTransactionFields = function(that, t) {
+    t = t || that.transaction;
+    store.log.debug('transaction fields for ' + that.id);
+    // using legacy transactions (platform specific)
+    if (t.type === 'ios-appstore' && t.expires_date_ms) {
+        that.lastRenewalDate = new Date(parseInt(t.purchase_date_ms));
+        that.expiryDate = new Date(parseInt(t.expires_date_ms));
+        store.log.debug('expiryDate: ' + that.expiryDate.toISOString());
+    }
+    else if (t.type === 'android-playstore' && t.expiryTimeMillis > 0) {
+        that.lastRenewalDate = new Date(parseInt(t.startTimeMillis));
+        that.expiryDate = new Date(parseInt(t.expiryTimeMillis));
+        store.log.debug('expiryDate: ' + that.expiryDate.toISOString());
+    }
+    // using unified transaction fields
+    if (t.expiryDate)
+        that.expiryDate = new Date(t.expiryDate);
+    if (t.lastRenewalDate)
+        that.lastRenewalDate = new Date(t.lastRenewalDate);
+    if (t.renewalIntent)
+        that.renewalIntent = t.renewalIntent;
+    // owned?
+    if (that.type === store.PAID_SUBSCRIPTION && +that.expiryDate) {
+        var now = +new Date();
+        if (now > that.expiryDate.getTime() + 60000) {
+            window.setTimeout(function() {
+                if (that.state === store.OWNED) {
+                    that.set('state', store.APPROVED);
+                    that.verify();
+                }
+            }, 30000);
+        }
+    }
+    return t;
 };
 
 ///

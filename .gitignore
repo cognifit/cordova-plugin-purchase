@@ -5,7 +5,8 @@
 /www/.store-android.js
 /www/.store-ios.js
 *~
-
+.*.swp
+.checkstyle.jar
 npm-debug.log
 /.idea
 /demo

@@ -1,8 +1,15 @@
 (function() {
-"use strict";
+
+var dateFields = ['expiryDate', 'purchaseDate', 'lastRenewalDate', 'renewalIntentChangeDate'];
 
 store.Product.prototype.set = function(key, value) {
     if (typeof key === 'string') {
+        if (dateFields.indexOf(key) >= 0 && !(value instanceof Date)) {
+            value = new Date(value);
+        }
+        if (key === 'isExpired' && value === true && this.owned) {
+            this.set('state', store.VALID);
+        }
         this[key] = value;
         if (key === 'state')
             this.stateChanged();
@@ -16,6 +23,35 @@ store.Product.prototype.set = function(key, value) {
     }
 };
 
+var attributesStack = {};
+
+store.Product.prototype.push = function(key, value) {
+    // save attributes
+    var stack = attributesStack[this.id];
+    if (!stack) {
+        stack = attributesStack[this.id] = [];
+    }
+    stack.push(JSON.stringify(this));
+    // update attributes
+    this.set(key, value);
+};
+
+store.Product.prototype.pop = function() {
+    // restore attributes
+    var stack = attributesStack[this.id];
+    if (!stack) {
+        return;
+    }
+    var json = stack.pop();
+    if (!json) {
+        return;
+    }
+    var attributes = JSON.parse(json);
+    for (var key in attributes) {
+        this.set(key, attributes[key]);
+    }
+};
+
 store.Product.prototype.stateChanged = function() {
 
     // update some properties useful to the user
@@ -23,6 +59,10 @@ store.Product.prototype.stateChanged = function() {
     // complex conditions.
 
     this.canPurchase = this.state === store.VALID;
+    store.getGroup(this.group).forEach(function(otherProduct) {
+        if (otherProduct.state === store.INITIATED)
+            this.canPurchase = false;
+    }.bind(this));
     this.loaded      = this.state && this.state !== store.REGISTERED;
     this.owned       = this.owned || this.state === store.OWNED;
     this.downloading = this.downloading || this.state === store.DOWNLOADING;
@@ -32,6 +72,8 @@ store.Product.prototype.stateChanged = function() {
     this.valid       = this.state !== store.INVALID;
     if (!this.state || this.state === store.REGISTERED)
         delete this.valid;
+
+    store.log.debug("state: " + this.id + " -> " + this.state);
 
     if (this.state)
         this.trigger(this.state);

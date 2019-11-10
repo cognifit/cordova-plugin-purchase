@@ -1,17 +1,17 @@
 (function() {
-'use strict';
+
 
 /// ## <a name="validator"></a> *store.validator*
 /// Set this attribute to either:
 ///
 ///  - the URL of your purchase validation service
-///     - Fovea's [reeceipt](http://reeceipt.fovea.cc) or your own service.
+///     - [Fovea's receipt validator](https://billing.fovea.cc) or your own service.
 ///  - a custom validation callback method
 ///
 /// #### example usage
 ///
 /// ```js
-/// store.validator = "http://store.fovea.cc:1980/check-purchase";
+/// store.validator = "https://validator.fovea.cc";
 /// ```
 ///
 /// ```js
@@ -36,7 +36,83 @@
 /// });
 /// ```
 /// Validation error codes are [documented here](#validation-error-codes).
+///
+/// Fovea's receipt validator is [available here](https://billing.fovea.cc).
 store.validator = null;
+
+var validationRequests = [];
+var timeout = null;
+
+function runValidation() {
+  store.log.debug('runValidation()');
+
+  timeout = null;
+  var requests = validationRequests;
+  validationRequests = [];
+
+  // Merge validation requests by products.
+  var byProduct = {};
+  requests.forEach(function(request) {
+    var productId = request.product.id;
+    if (byProduct[productId]) {
+      byProduct[productId].callbacks.push(request.callback);
+      // assume the most up to date value for product will come last
+      byProduct[productId].product = request.product;
+    }
+    else {
+      byProduct[productId] = {
+        product: request.product,
+        callbacks: [request.callback]
+      };
+    }
+  });
+
+  // Run one validation request for each product.
+  Object.keys(byProduct).forEach(function(productId) {
+      var request = byProduct[productId];
+      var product = request.product;
+
+      // Ensure applicationUsername is sent with validation requests
+      if (!product.additionalData) {
+          product.additionalData = {};
+      }
+      if (!product.additionalData.applicationUsername) {
+          product.additionalData.applicationUsername =
+              store.getApplicationUsername(product);
+      }
+      if (!product.additionalData.applicationUsername) {
+          delete product.additionalData.applicationUsername;
+      }
+
+      // Post
+      store.utils.ajax({
+          url: store.validator,
+          method: 'POST',
+          data: product,
+          success: function(data) {
+              store.log.debug("validator success, response: " + JSON.stringify(data));
+              request.callbacks.forEach(function(callback) {
+                  callback(data && data.ok, data.data);
+              });
+          },
+          error: function(status, message, data) {
+              var fullMessage = "Error " + status + ": " + message;
+              store.log.debug("validator failed, response: " + JSON.stringify(fullMessage));
+              store.log.debug("body => " + JSON.stringify(data));
+              request.callbacks.forEach(function(callback) {
+                  callback(false, fullMessage);
+              });
+          }
+      });
+  });
+}
+
+function scheduleValidation() {
+  store.log.debug('scheduleValidation()');
+  if (timeout)
+    clearTimeout(timeout);
+  timeout = setTimeout(runValidation, 1500);
+}
 
 //
 // ## store._validator
@@ -60,21 +136,11 @@ store._validator = function(product, callback, isPrepared) {
     }
 
     if (typeof store.validator === 'string') {
-        store.utils.ajax({
-            url: store.validator,
-            method: 'POST',
-            data: product,
-            success: function(data) {
-                store.log.debug("validator success, response: " + JSON.stringify(data));
-                callback(data && data.ok, data.data);
-            },
-            error: function(status, message, data) {
-                var fullMessage = "Error " + status + ": " + message;
-                store.log.debug("validator failed, response: " + JSON.stringify(fullMessage));
-                store.log.debug("body => " + JSON.stringify(data));
-                callback(false, fullMessage);
-            }
+        validationRequests.push({
+            product: product,
+            callback: callback
         });
+        scheduleValidation();
     }
     else {
         store.validator(product, callback);
@@ -95,7 +161,23 @@ store._validator = function(product, callback, isPrepared) {
 ///
 /// Start [here for Android](https://developer.android.com/google/play/billing/billing_integrate.html#billing-security).
 ///
-/// Another option is to use [Fovea's reeceipt validation service](http://reeceipt.fovea.cc/) that implements all the best practices to secure your transactions.
+/// Another option is to use [Fovea's validation service](http://billing.fovea.cc/) that implements all the best practices to secure your transactions.
 ///
+
+///
+/// ## <a name="update"></a> *store.update*
+///
+/// Refresh the historical state of purchases and price of items.
+/// This is required to know if a user is eligible for promotions like introductory
+/// offers or subscription discount.
+///
+/// It is recommended to call this method right before entering your in-app
+/// purchases or subscriptions page.
+///
+/// You can of `update()` as a light version of `refresh()` that won't ask for the
+/// user password. Note that this method is called automatically for you on a few
+/// useful occasions, like when a subscription expires.
+///
+store.update = function() {};
 
 })();
