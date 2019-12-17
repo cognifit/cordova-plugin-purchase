@@ -271,6 +271,7 @@ The `sandbox` property defines if you want to invoke the platform purchase sandb
 
 ## Constants
 
+    store.billingKey = 'BILLING_KEY';
 
 ### product types
 
