@@ -274,6 +274,11 @@ public class PurchasePlugin
       long time = System.currentTimeMillis();
       PurchasesResult purchasesResult =
         mBillingClient.queryPurchases(SkuType.INAPP);
+      List<Purchase> purchases = new ArrayList<Purchase>();
+      BillingResult result = purchasesResult.getBillingResult();
+      if (result.getResponseCode() == BillingResponseCode.OK) {
+          purchases.addAll(purchasesResult.getPurchasesList());
+      }
       Log.i(mTag, "queryPurchases() -> Elapsed time: "
           + (System.currentTimeMillis() - time) + "ms");
       // If there are subscriptions supported, we add subscription rows as well
@@ -290,9 +295,12 @@ public class PurchasePlugin
             + subscriptionResult.getResponseCode()
             + " res: " + purchasesListSize);
 
-        if (subscriptionResult.getResponseCode() == BillingResponseCode.OK) {
-          purchasesResult.getPurchasesList().addAll(
-              subscriptionResult.getPurchasesList());
+        if (subscriptionResult.getResponseCode() == BillingResponseCode.OK
+                && subscriptionResult.getPurchasesList() != null) {
+          // if purchases failed but subs succeed, better return a success anyway.
+          // (so the app has something to show)
+          result = subscriptionResult.getBillingResult();
+          purchases.addAll(subscriptionResult.getPurchasesList());
         } else {
           Log.e(mTag, "queryPurchases() -> "
               + "Error trying to query subscription purchases.");
@@ -304,7 +312,7 @@ public class PurchasePlugin
         Log.w(mTag, "queryPurchases() -> Error response code: "
             + purchasesResult.getResponseCode());
       }
-      onQueryPurchasesFinished(purchasesResult);
+      onQueryPurchasesFinished(new PurchasesResult(result, purchases));
     });
   }
 

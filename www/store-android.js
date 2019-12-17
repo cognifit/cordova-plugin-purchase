@@ -1491,24 +1491,99 @@ store.off = function(callback) {
 /// ## <a name="validator"></a> *store.validator*
 /// Set this attribute to either:
 ///
-///  - the URL of your purchase validation service
+///  - the URL of your purchase validation service ([example](#validation-url-example))
 ///     - [Fovea's receipt validator](https://billing.fovea.cc) or your own service.
-///  - a custom validation callback method
+///  - a custom validation callback method ([example](#validation-callback-example))
 ///
-/// #### example usage
+/// #### validation URL example
 ///
 /// ```js
-/// store.validator = "https://validator.fovea.cc";
+/// store.validator = "https://validator.fovea.cc"; // if you want to use Fovea **
 /// ```
+///
+/// * **URL**
+///
+///   `/your-check-purchase-path`
+///
+/// * **Method:**
+///
+///   `POST`
+///
+/// * **Data Params**
+///
+///   The **product** object will be added as a json string.
+///
+///   Example body:
+///
+///   ```js
+///   {
+///     additionalData : null
+///     alias : "monthly1"
+///     currency : "USD"
+///     description : "Monthly subscription"
+///     id : "subscription.monthly"
+///     loaded : true
+///     price : "$12.99"
+///     priceMicros : 12990000
+///     state : "approved"
+///     title : "The Monthly Subscription Title"
+///     transaction : { // Additional fields based on store type (see "transactions" below)  }
+///     type : "paid subscription"
+///     valid : true
+///   }
+///   ```
+///
+///   The `transaction` parameter is an object, see [transactions](#transactions).
+///
+/// * **Success Response:**
+///   * **Code:** 200 <br />
+///     **Content:**
+///     ```
+///     {
+///         ok : true,
+///         data : {
+///             transaction : { // Additional fields based on store type (see "transactions" below) }
+///         }
+///     }
+///     ```
+///     The `transaction` parameter is an object, see [transactions](#transactions).  Optional.  Will replace the product's transaction field with this.
+///
+/// * **Error Response:**
+///   * **Code:** 200 (for [validation error codes](#validation-error-codes))<br />
+///     **Content:**
+///     ```
+///     {
+///         ok : false,
+///         data : {
+///             code : 6778003 // Int. Corresponds to a validation error code, click above for options.
+///         }
+///         error : { // (optional)
+///             message : "The subscription is expired."
+///         }
+///     }
+///     ```
+///   OR
+///   * **Code:** non-200 <br />
+///   The response's *status* and *statusText* will be displayed in an formatted error string.
+///
+///
+/// ** Fovea's receipt validator is [available here](https://billing.fovea.cc).
+///
+/// #### validation callback example
 ///
 /// ```js
 /// store.validator = function(product, callback) {
 ///
+///     // Here, you will typically want to contact your own webservice
+///     // where you check transaction receipts with either Apple or
+///     // Google servers.
 ///     callback(true, { ... transaction details ... }); // success!
+///     callback(true, { transaction: "your custom details" }); // success!
+///         // your custom details will be merged into the product's transaction field
 ///
 ///     // OR
 ///     callback(false, {
-///         code: store.PURCHASE_EXPIRED,
+///         code: store.PURCHASE_EXPIRED, // **Validation error code
 ///         error: {
 ///             message: "XYZ"
 ///         }
@@ -1522,9 +1597,9 @@ store.off = function(callback) {
 ///     // Google servers.
 /// });
 /// ```
-/// Validation error codes are [documented here](#validation-error-codes).
 ///
-/// Fovea's receipt validator is [available here](https://billing.fovea.cc).
+/// ** Validation error codes are [documented here](#validation-error-codes).
+///
 store.validator = null;
 
 var validationRequests = [];
@@ -1639,16 +1714,51 @@ store._validator = function(product, callback, isPrepared) {
 ///
 /// A purchased product will contain transaction information that can be
 /// sent to a remote server for validation. This information is stored
-/// in the `product.transaction` field. It has the following format:
+/// in the `product.transaction` data. This field is an object with a
+/// different format depending on the store type.
+///
+/// The `product.transaction` field has the following format:
 ///
 /// - `type`: "ios-appstore" or "android-playstore"
 /// - store specific data
 ///
+/// #### store specific data - iOS
+///
 /// Refer to [this documentation for iOS](https://developer.apple.com/library/ios/releasenotes/General/ValidateAppStoreReceipt/Chapters/ReceiptFields.html#//apple_ref/doc/uid/TP40010573-CH106-SW1).
+///
+/// **Transaction Fields (Subscription)**
+///
+/// ```
+///     appStoreReceipt:"appStoreReceiptString"
+///     id : "idString"
+///     original_transaction_id:"transactionIdString",
+///     "type": "ios-appstore"
+/// ```
+///
+/// #### store specific data - Android
 ///
 /// Start [here for Android](https://developer.android.com/google/play/billing/billing_integrate.html#billing-security).
 ///
-/// Another option is to use [Fovea's validation service](http://billing.fovea.cc/) that implements all the best practices to secure your transactions.
+/// ```
+/// developerPayload : undefined
+/// id : "idString"
+/// purchaseToken : "purchaseTokenString"
+/// receipt : '{ // NOTE: receipt's value is string and will need to be parsed
+///     "autoRenewing":true,
+///     "orderId":"orderIdString",
+///     "packageName":"com.mycompany",
+///     "purchaseTime":1555217574101,
+///     "purchaseState":0,
+///     "purchaseToken":"purchaseTokenString"
+/// }'
+/// signature : "signatureString",
+/// "type": "android-playstore"
+/// ```
+///
+/// #### Fovea
+///
+/// Another option is to use [Fovea's validation service](http://billing.fovea.cc/) that implements
+/// all the best practices to enhance your subscriptions and secure your transactions.
 ///
 
 ///
@@ -2850,9 +2960,31 @@ function iabLoaded(validProducts) {
             p = null;
 
         if (p) {
+            // See https://en.wikipedia.org/wiki/ISO_8601#Time_intervals
+            // assuming simple periods (P1M, P6W, ...)
+            var normalizeISOPeriodUnit = function (period) {
+                switch (period.slice(-1)) {
+                    case 'D': return 'Day';
+                    case 'W': return 'Week';
+                    case 'M': return 'Month';
+                    case 'Y': return 'Year';
+                    default:  return period;
+                }
+            };
+            var normalizeISOPeriodCount = function (period) {
+              return parseInt(period.replace(/[A-Z]+/g, ''));
+            };
+
+            var trimTitle = function (title) {
+              return title.split('(').slice(0, -1).join('(').replace(/ $/, '');
+            };
+
             var subscriptionPeriod = vp.subscriptionPeriod ? vp.subscriptionPeriod : "";
             var introPriceSubscriptionPeriod = vp.introductoryPricePeriod ? vp.introductoryPricePeriod : "";
             var introPriceNumberOfPeriods = vp.introductoryPriceCycles ? vp.introductoryPriceCycles : 0;
+            var introPricePeriodUnit = normalizeISOPeriodUnit(introPriceSubscriptionPeriod);
+            var introPricePeriodCount = normalizeISOPeriodCount(introPriceSubscriptionPeriod);
+            var introPricePeriod = (introPriceNumberOfPeriods || 1) * (introPricePeriodCount || 1);
 
             var introPricePaymentMode = null;
             if (vp.freeTrialPeriod) {
@@ -2867,31 +2999,16 @@ function iabLoaded(validProducts) {
                 }
             }
 
-            // See https://en.wikipedia.org/wiki/ISO_8601#Time_intervals
-            // assuming simple periods (P1M, P6W, ...)
-            var normalizeISOPeriodUnit = function (period) {
-                switch (period.slice(-1)) {
-                    case 'D': return 'Day';
-                    case 'W': return 'Week';
-                    case 'M': return 'Month';
-                    case 'Y': return 'Year';
-                    default:  return period;
-                }
-            };
-            var normalizeISOPeriodCount = function (period) {
-              return parseInt(period.slice(1).slice(-1));
-            };
-            introPriceSubscriptionPeriod = normalizeISOPeriodUnit(introPriceSubscriptionPeriod);
+            if (!introPricePaymentMode) {
+                introPricePeriod= null;
+                introPricePeriodUnit = null;
+            }
 
             var parsedSubscriptionPeriod = {};
             if (subscriptionPeriod) {
               parsedSubscriptionPeriod.unit = normalizeISOPeriodUnit(subscriptionPeriod);
               parsedSubscriptionPeriod.count = normalizeISOPeriodCount(subscriptionPeriod);
             }
-
-            var trimTitle = function (title) {
-              return title.split('(').slice(0, -1).join('(').replace(/ $/, '');
-            };
 
             p.set({
                 title: trimTitle(vp.title || vp.name),
@@ -2905,10 +3022,10 @@ function iabLoaded(validProducts) {
                 currency: vp.price_currency_code || "",
                 introPrice: vp.introductoryPrice ? vp.introductoryPrice : "",
                 introPriceMicros: vp.introductoryPriceAmountMicros ? vp.introductoryPriceAmountMicros : "",
-                introPricePeriod: introPriceNumberOfPeriods,
-                introPricePeriodUnit: introPriceSubscriptionPeriod,
-                introPriceNumberOfPeriods: introPriceNumberOfPeriods, // legacy props (deprecated)
-                introPriceSubscriptionPeriod: introPriceSubscriptionPeriod, // legacy props (deprecrated)
+                introPricePeriod: introPricePeriod,
+                introPricePeriodUnit: introPricePeriodUnit,
+                introPriceNumberOfPeriods: introPricePeriod, // legacy props (deprecated)
+                introPriceSubscriptionPeriod: introPricePeriodUnit, // legacy props (deprecrated)
                 introPricePaymentMode: introPricePaymentMode,
                 state: store.VALID
             });
