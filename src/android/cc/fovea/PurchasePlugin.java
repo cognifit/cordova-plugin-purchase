@@ -201,11 +201,7 @@ public class PurchasePlugin
         // Method not found
         return isValidAction;
     }
-
-    private String getPublicKey() {
-        return this.mBillingKey;
-    }
-
+    
     // Initialize the plugin
     private void init(
             final String billingKey,
