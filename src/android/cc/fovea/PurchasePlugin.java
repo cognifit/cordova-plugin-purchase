@@ -188,7 +188,18 @@ public class PurchasePlugin
                 Intent browserIntent = new Intent(Intent.ACTION_VIEW,
                         Uri.parse("http://play.google.com/store/paymentmethods"));
                 cordova.getActivity().startActivity(browserIntent);
-            } else {
+            } else if ("addProduct".equals(action)) {
+              final String productIdentifier = data.getString(0);
+              final boolean isSubscription = data.getBoolean(1);
+
+              if (isSubscription && !this.mSubsSkus.contains((productIdentifier))) {
+                  this.mSubsSkus.add(productIdentifier);
+              } else if (!isSubscription && !this.mInAppSkus.contains(productIdentifier)) {
+                  this.mInAppSkus.add(productIdentifier);
+              }
+
+              callSuccess();
+          } else {
                 // No handler for the action
                 isValidAction = false;
             }
