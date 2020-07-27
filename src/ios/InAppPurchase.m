@@ -352,6 +352,7 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
       DLog(@"load:  - %@", item);
     }
     SKProductsRequest *productsRequest = [[SKProductsRequest alloc] initWithProductIdentifiers:productIdentifiers];
+    [self logInLogEntriesWithFormat:@"SKProductsRequest.identifiers = %@", [productIdentifiers.allObjects componentsJoinedByString:@","]];
 
     BatchProductsRequestDelegate* delegate = [[BatchProductsRequestDelegate alloc] init];
     productsRequest.delegate = delegate;
@@ -956,6 +957,24 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
     return YES;
 }
 
+- (void) logInLogEntries:(NSString *)message {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSString *log = [NSString stringWithFormat:@"LE.log(\"%@\");", message];
+        [self.webViewEngine evaluateJavaScript:log completionHandler:^(id ignore1, NSError * ignore2) {
+            
+        }];
+    });
+}
+
+- (void) logInLogEntriesWithFormat:(NSString *)format, ... NS_FORMAT_FUNCTION(1,2) {
+    va_list variadic;
+    va_start(variadic, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:variadic];
+    va_end(variadic);
+    
+    [self logInLogEntries:message];
+}
+
 @end
 /**
  * Receive refreshed app receipt
@@ -1026,6 +1045,8 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
     DLog(@"BatchProductsRequestDelegate.productsRequest:didReceiveResponse:");
     NSMutableArray *validProducts = [NSMutableArray array];
     DLog(@"BatchProductsRequestDelegate.productsRequest:didReceiveResponse: Has %li validProducts", (unsigned long)[response.products count]);
+    [self.plugin logInLogEntriesWithFormat:@"SKProductsRequest.didReceive %li products", response.products.count];
+    
     for (SKProduct *product in response.products) {
         NSString *currencyCode = priceLocaleCurrencyCode(product.priceLocale);
         NSString *countryCode = [product.priceLocale objectForKey: NSLocaleCountryCode];
@@ -1102,6 +1123,7 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
                 NILABLE(billingPeriodUnit),            @"billingPeriodUnit",
                 nil]];
         [self.plugin.products setObject:product forKey:[NSString stringWithFormat:@"%@", product.productIdentifier]];
+        [self.plugin logInLogEntriesWithFormat:@"SKProductsRequest.didReceive: %@ at %@", product.productIdentifier, product.localizedPrice];
     }
 
     NSArray *callbackArgs = [NSArray arrayWithObjects:
@@ -1134,6 +1156,9 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
 - (void)request:(SKRequest *)request didFailWithError:(NSError *)error
 {
     DLog(@"BatchProductsRequestDelegate.request:didFailWithError: AppStore unavailable (ERROR %li)", (unsigned long)error.code);
+    [self.plugin logInLogEntriesWithFormat:@"SKProductsRequest.didFail. Code: %li", (unsigned long) error.code];
+    [self.plugin logInLogEntriesWithFormat:@"SKProductsRequest.didFail. Domain: %@", error.domain];
+    [self.plugin logInLogEntriesWithFormat:@"SKProductsRequest.didFail. Description: %@", error.localizedDescription];
 
     NSString *localizedDescription = [error localizedDescription];
     if (!localizedDescription)
