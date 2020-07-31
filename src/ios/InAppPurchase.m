@@ -282,12 +282,14 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
 
     if (![SKPaymentQueue canMakePayments]) {
         DLog(@"setup: Cant make payments, plugin disabled.");
+        [self logInLogEntries:@"IAPPlugin.setup: Cant make payments, plugin disabled."];
         CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Can't make payments"];
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
         return;
     }
     else {
         DLog(@"setup: OK");
+        [self logInLogEntries:@"IAPPlugin.setup: OK."];
     }
 
     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"InAppPurchase initialized"];
@@ -372,6 +374,7 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
 - (void) purchase: (CDVInvokedUrlCommand*)command {
 
     DLog(@"purchase: About to do IAP");
+    [self logInLogEntries:@"IAPPlugin.purchase: About to do IAP"];
     id identifier = [command.arguments objectAtIndex:0];
     id quantity =   [command.arguments objectAtIndex:1];
     NSString *applicationUsername = (NSString*)[command.arguments objectAtIndex:2];
@@ -408,10 +411,12 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
 
   if (![SKPaymentQueue canMakePayments]) {
       DLog(@"canMakePayments: Device can't make payments.");
+      [self logInLogEntries:@"IAPPlugin.canMakePayments: Device can't make payments."];
       pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Can't make payments"];
   }
   else {
       DLog(@"canMakePayments: Device can make payments.");
+      [self logInLogEntries:@"IAPPlugin.canMakePayments: Device can make payments."];
       pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Can make payments"];
   }
 
@@ -468,16 +473,19 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
         error = state = transactionIdentifier = originalTransactionIdentifier = transactionReceipt = productId = @"";
         errorCode = 0;
         DLog(@"paymentQueue:updatedTransactions: %@", transaction.payment.productIdentifier);
+        [self logInLogEntriesWithFormat:@"IAPPlugin.purchase: paymentQueue:updatedTransactions: %@", transaction.payment.productIdentifier];
 
         switch (transaction.transactionState) {
 
             case SKPaymentTransactionStatePurchasing:
                 DLog(@"paymentQueue:updatedTransactions: Purchasing...");
+                [self logInLogEntries:@"IAPPlugin.paymentQueue:updatedTransactions: Purchasing..."];
                 state = @"PaymentTransactionStatePurchasing";
                 productId = transaction.payment.productIdentifier;
                 break;
 
             case SKPaymentTransactionStatePurchased:
+                [self logInLogEntries:@"IAPPlugin.paymentQueue:updatedTransactions: Purchased"];
                 state = @"PaymentTransactionStatePurchased";
                 transactionIdentifier = transaction.transactionIdentifier;
 #if TARGET_OS_IPHONE
@@ -501,6 +509,7 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
                 errorCode = jsErrorCode(transaction.error.code);
                 productId = transaction.payment.productIdentifier;
                 DLog(@"paymentQueue:updatedTransactions: Error %@ - %@", jsErrorCodeAsString(errorCode), error);
+                [self logInLogEntriesWithFormat:@"IAPPlugin.paymentQueue:updatedTransactions: Error %@ - %@", jsErrorCodeAsString(errorCode), error];
 
                 // Finish failed transactions, when autoFinish is off
                 if (!g_autoFinishEnabled) {
@@ -510,6 +519,7 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
                 break;
 
             case SKPaymentTransactionStateRestored:
+                [self logInLogEntries:@"IAPPlugin.paymentQueue:updatedTransactions: Restored"];
                 state = @"PaymentTransactionStateRestored";
                 transactionIdentifier = transaction.transactionIdentifier;
                 if (!transactionIdentifier)
