@@ -312,8 +312,6 @@ store.sandbox = false;
 /// ## Constants
 ///
 
-/*///*/     store.billingKey = 'BILLING_KEY';
-
 ///
 /// ### product types
 ///
@@ -485,6 +483,9 @@ store.Product = function(options) {
     ///  - `product.owned` - Product is owned
     this.owned = options.owned;
 
+    ///  - `product.deferred` - Purchase has been initiated but is waiting for external action (for example, Ask to Buy on iOS)
+    this.deferred = options.deferred;
+
     ///  - `product.introPrice` - Localized introductory price, with currency symbol
     this.introPrice = options.introPrice || null;
 
@@ -645,18 +646,26 @@ store.Product.prototype.verify = function() {
                 // for introductory prices.
                 if (data && data.ineligible_for_intro_price &&
                          data.ineligible_for_intro_price.forEach) {
+                    var ineligibleGroups = {};
                     data.ineligible_for_intro_price.forEach(function(pid) {
                         var p = store.get(pid);
-                        if (p) {
-                            p.set('ineligibleForIntroPrice', true);
-                            store.log.debug('verify -> ' + pid + ' ineligibleForIntroPrice:true');
-                        }
+                        if (p && p.group)
+                            ineligibleGroups[p.group] = true;
                     });
                     store.products.forEach(function(p) {
-                        if (p.ineligibleForIntroPrice &&
-                            (data.ineligible_for_intro_price.indexOf(p.id) < 0)) {
-                            p.set('ineligibleForIntroPrice', false);
-                            store.log.debug('verify -> ' + p.id + ' ineligibleForIntroPrice:false');
+                        if (data.ineligible_for_intro_price.indexOf(p.id) >= 0) {
+                            store.log.debug('verify -> ' + p.id + ' ineligibleForIntroPrice:true');
+                            p.set('ineligibleForIntroPrice', true);
+                        }
+                        else {
+                            if (p.group && ineligibleGroups[p.group]) {
+                                store.log.debug('verify -> ' + p.id + ' ineligibleForIntroPrice:true');
+                                p.set('ineligibleForIntroPrice', true);
+                            }
+                            else {
+                                store.log.debug('verify -> ' + p.id + ' ineligibleForIntroPrice:false');
+                                p.set('ineligibleForIntroPrice', false);
+                            }
                         }
                     });
                 }
@@ -957,10 +966,10 @@ store.error.unregister = function(cb) {
 store.register = function(product) {
     if (!product)
         return;
-    if (!product.length)
-        store.register([product]);
-    else
+    if (typeof product.length === 'number')
         registerProducts(product);
+    else
+        store.register([product]);
 };
 
 /// ##### example usage
@@ -1646,11 +1655,14 @@ function runValidation() {
           delete product.additionalData.applicationUsername;
       }
 
+      var data = JSON.parse(JSON.stringify(product));
+      data.device = Object.assign(data.device || {}, getDeviceInfo());
+
       // Post
       store.utils.ajax({
           url: store.validator,
           method: 'POST',
-          data: product,
+          data: data,
           success: function(data) {
               store.log.debug("validator success, response: " + JSON.stringify(data));
               request.callbacks.forEach(function(callback) {
@@ -1667,6 +1679,106 @@ function runValidation() {
           }
       });
   });
+
+  function isArray(arg) {
+    return Object.prototype.toString.call(arg) === '[object Array]';
+  }
+  function isObject(arg) {
+    return Object.prototype.toString.call(arg) === '[object Object]';
+  }
+
+  // List of functions allowed by store.validator_privacy_policy
+  function getPrivacyPolicy () {
+    if (typeof store.validator_privacy_policy === 'string')
+      return store.validator_privacy_policy.split(',');
+    else if (isArray(store.validator_privacy_policy))
+      return store.validator_privacy_policy;
+    else // default: no tracking
+      return ['analytics','support','fraud'];
+  }
+
+  function getDeviceInfo () {
+
+    var privacy_policy = getPrivacyPolicy(); // string[]
+    function allowed(policy) {
+      return privacy_policy.indexOf(policy) >= 0;
+    }
+
+    // Different versions of the plugin use different response fields.
+    // Sending this information allows the validator to reply with only expected information.
+    var ret = {
+      plugin: 'cordova-plugin-purchase/' + store.version,
+    };
+
+    // the cordova-plugin-device global object
+    var device = {};
+    if (isObject(this.device))
+      device = this.device;
+
+    // Send the receipt validator information about the device.
+    // This will allow to make vendor or device specific fixes and detect class
+    // of devices with issues.
+    // Knowing running version of OS and libraries also required for handling
+    // support requests.
+    if (allowed('analytics') || allowed('support')) {
+      // Version of ionic (if applicable)
+      var ionic = this.Ionic || this.ionic;
+      if (ionic && ionic.version)
+        ret.ionic = ionic.version;
+      // Information from the cordova-plugin-device (if installed)
+      if (device.cordova)
+        ret.cordova = device.cordova; // Version of cordova
+      if (device.model)
+        ret.model = device.model; // Device model
+      if (device.platform)
+        ret.platform = device.platform; // OS
+      if (device.version)
+        ret.version = device.version; // OS version
+      if (device.manufacturer)
+        ret.manufacturer = device.manufacturer; // Device manufacturer
+    }
+
+    // Device identifiers are used for tracking users across services
+    // It is sometimes required for support requests too, but I choose to
+    // keep this out.
+    if (allowed('tracking')) {
+      if (device.serial)
+        ret.serial = device.serial; // Hardware serial number
+      if (device.uuid)
+        ret.uuid = device.uuid; // Device UUID
+    }
+
+    // Running from a simulator is an error condition for in-app purchases.
+    // Since only developers run in a simulator, let's always report that.
+    if (device.isVirtual)
+      ret.isVirtual = device.isVirtual; // Simulator
+
+    // Probably nobody wants to disable fraud discovery.
+    // A fingerprint of the device identifiers is used for fraud discovery.
+    // An alert should be triggered by the validator when a lot of devices
+    // share a single receipt.
+    if (allowed('fraud')) {
+      // For fraud discovery, we only need a fingerprint of the device.
+      var fingerprint = '';
+      if (device.serial)
+        fingerprint = 'serial:' + device.serial; // Hardware serial number
+      else if (device.uuid)
+        fingerprint = 'uuid:' + device.uuid; // Device UUID
+      else {
+        // Using only model and manufacturer, we might end-up with many
+        // users sharing the same fingerprint, which is fine for fraud discovery.
+        if (device.model)
+          fingerprint += '/' + device.model;
+        if (device.manufacturer)
+          fingerprint = '/' + device.manufacturer;
+      }
+      // Fingerprint is hashed to keep required level of privacy.
+      if (fingerprint)
+        ret.fingerprint = store.utils.md5(fingerprint);
+    }
+
+    return ret;
+  }
 }
 
 function scheduleValidation() {
@@ -1762,7 +1874,7 @@ store._validator = function(product, callback, isPrepared) {
 ///
 
 ///
-/// ## <a name="update"></a> *store.update*
+/// ## <a name="update"></a> *store.update()*
 ///
 /// Refresh the historical state of purchases and price of items.
 /// This is required to know if a user is eligible for promotions like introductory
@@ -1802,6 +1914,17 @@ store.update = function() {};
 /// _NOTE:_ It is a required by the Apple AppStore that a "Refresh Purchases"
 ///         button be visible in the UI.
 ///
+/// ##### return value
+///
+/// This method returns a promise-like object with the following functions:
+///
+/// - `.completed(fn)` - Calls `fn` when the queue of previous purchases have been processed.
+///   At this point, all previously owned products should be in the approved state.
+/// - `.finished(fn)` - Calls `fn` when all purchased in the approved state have been finished
+///   or expired.
+///
+/// In the case of the restore purchases call, you will want to hide any progress bar when the
+/// `finished` callback is called.
 ///
 /// ##### example usage
 ///
@@ -1818,21 +1941,77 @@ store.update = function() {};
 ///
 /// Add a "Refresh Purchases" button to call the `store.refresh()` method, like:
 ///
-/// `<button onclick="store.refresh()">Restore Purchases</button>`
+/// ```html
+/// <button onclick="restorePurchases()">Restore Purchases</button>
+/// ```
+///
+/// ```js
+/// function restorePurchases() {
+///    showProgress();
+///    store.refresh().finished(hideProgress);
+/// }
+/// ```
 ///
 /// To make the restore purchases work as expected, please make sure that
-/// the "approved" event listener had be registered properly,
-/// and in the callback `product.finish()` should be called.
+/// the "approved" event listener had be registered properly
+/// and, in the callback, `product.finish()` is called after handling.
 ///
 
 var initialRefresh = true;
 
+function createPromise() {
+    var events = {};
+
+    // refresh-completed is called when all owned products have been
+    // sent to the approved state.
+    store.once("", "refresh-completed", function() {
+        if (events["refresh-completed"]) return;
+        events["refresh-completed"] = true;
+        store.when().updated(checkFinished);
+        checkFinished(); // make sure this is called at least once
+    });
+
+    // trigger the refresh-finished event when no more products are in the
+    // approved state.
+    function checkFinished() {
+        if (events["refresh-finished"]) return;
+        function isApproved(p) { return p.state === store.APPROVED; }
+        if (store.products.filter(isApproved).length === 0) {
+            // done processing
+            store.off(checkFinished);
+            events["refresh-finished"] = true;
+            setTimeout(function() {
+                // if "completed" triggers "finished",
+                // the setTimeout guarantees calling order
+                store.trigger("refresh-finished");
+            }, 100);
+        }
+    }
+
+    return {
+        completed: genPromise("refresh-completed"),
+        finished: genPromise("refresh-finished"),
+    };
+
+    function genPromise(eventName) {
+        return function(cb) {
+            if (events[eventName])
+                cb();
+            else
+                store.once("", eventName, cb);
+            return this;
+        };
+    }
+}
+
 store.refresh = function() {
+
+    var promise = createPromise();
 
     store.trigger("refreshed");
     if (initialRefresh) {
         initialRefresh = false;
-        return;
+        return promise;
     }
 
     store.log.debug("refresh -> checking products state (" + store.products.length + " products)");
@@ -1855,8 +2034,8 @@ store.refresh = function() {
     }
 
     store.trigger("re-refreshed");
+    return promise;
 };
-
 
 })();
 
@@ -2161,6 +2340,7 @@ store.Product.prototype.stateChanged = function() {
     this.owned       = this.owned || this.state === store.OWNED;
     this.downloading = this.downloading || this.state === store.DOWNLOADING;
     this.downloaded  = this.downloaded || this.state === store.DOWNLOADED;
+    this.deferred    = this.deferred && this.state === store.INITIATED;
 
     // update validity
     this.valid       = this.state !== store.INVALID;
@@ -2661,7 +2841,7 @@ if (typeof Object.assign != 'function') {
     };
 }
 
-store.version = '10.0.1';
+store.version = '10.2.0';
 /*
  * Copyright (C) 2012-2013 by Guillaume Charhon
  * Modifications 10/16/2013 by Brian Thurlow
@@ -2720,11 +2900,13 @@ InAppBilling.prototype.init = function (success, fail, options, skus, inAppSkus,
     var listener = this.listener.bind(this);
     cordova.exec(listener, function(err) {}, "InAppBillingPlugin", "setListener", []);
 
-    var args = [store.billingKey];
 	if (hasSKUs) {
-    	args.push.apply(args, [skus, inAppSkus, subsSkus]);
+		cordova.exec(success, errorCb(fail), "InAppBillingPlugin", "init", [skus, inAppSkus, subsSkus]);
     }
-    cordova.exec(success, errorCb(fail), "InAppBillingPlugin", "init", args);
+	else {
+        //No SKUs
+		cordova.exec(success, errorCb(fail), "InAppBillingPlugin", "init", []);
+    }
 };
 InAppBilling.prototype.listener = function (msg) {
     // Handle changes to purchase that are being notified
@@ -2856,6 +3038,13 @@ store.when("re-refreshed", function() {
     });
 });
 
+store.update = function(successCb, errorCb) {
+    store.iabGetPurchases(function() {
+        if (successCb)
+            successCb();
+    });
+};
+
 // The following table lists all of the server response codes
 // that are sent from Google Play to your application.
 //
@@ -2914,72 +3103,6 @@ function iabReady() {
         });
     });
 }
-
-/** START OF ANDROID HACK **/
-
-/** The following functions allow us to work around the fact that Android setups all in-app purchases when the store is initialized.
- * In our App this means that only the first component that setups products will have access to the item's prices and data. Subsequent
- * calls to register products will not work as the native code will not have the identifiers. See AppStoreService to see how these functions
- * are used. These are used only on Android devices, even if the code is added to the Windows OS version of this plugin.
- **/
-
-store.androidAddProductWithId = function (productId, callback) {
-    var identifier = productId.toLowerCase();
-
-    cordova.exec(function() {
-        if (inAppSkus.indexOf(identifier) < 0) {
-            inAppSkus.push(identifier);
-        }
-        if (typeof callback === 'function') {
-            callback();
-        }
-    }, undefined, "InAppBillingPlugin", "addProduct", [identifier, false]);
-};
-
-store.androidAddSubscriptionWithId = function (productId, callback) {
-    var identifier = productId.toLowerCase();
-    cordova.exec(function() {
-        if (subsSkus.indexOf(identifier) < 0) {
-            subsSkus.push(identifier);
-        }
-        if (typeof callback === 'function') {
-            callback();
-        }
-    }, undefined, "InAppBillingPlugin", "addProduct", [identifier, true]);
-};
-
-store.androidFetchProductsAndSubscriptions = function (callback) {
-     store.inappbilling.getAvailableProducts(function (validProducts) {
-        iabLoaded(validProducts);
-        if (typeof callback === 'function') {
-            callback(validProducts);
-        }
-     });
-};
-
-store.knowsProductWithId = function (productId) {
-    var identifier = productId.toLowerCase();
-    return inAppSkus.indexOf(identifier) >= 0 && typeof store.get(identifier) !== 'undefined' && typeof store.get(identifier).price === 'string';
-};
-
-store.knowsSubscriptionWithId = function (productId) {
-    var identifier = productId.toLowerCase();
-    return subsSkus.indexOf(identifier) >= 0 && typeof store.get(identifier) !== 'undefined' && typeof store.get(identifier).price === 'string';
-};
-
-/** END OF ANDROID HACK **/
-
-store.androidFetchProducts = function () {
-    iabReady();
-};
-
-store.knowsProductWithId = function (productId) {
-    return inAppSkus.filter(function (item) { return item.productId === productId; }).length > 0;
-};
-
-store.knowsSubscriptionWithId = function (productId) {
-    return subsSkus.filter(function (item) { return item.productId === productId; }).length > 0;
-};
 
 function iabPurchaseConsumed(purchase) {
   store.log.debug("iabPurchaseConsumed: " + JSON.stringify(purchase));

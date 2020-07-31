@@ -170,6 +170,7 @@ function storekitInit() {
         error:    storekitError,
         purchase: storekitPurchased,
         purchasing: storekitPurchasing,
+        deferred: storekitDeferred,
         restore:    storekitRestored,
         restoreCompleted: storekitRestoreCompleted,
         restoreFailed:    storekitRestoreFailed,
@@ -342,6 +343,7 @@ function storekitPurchasing(productId) {
         }
         if (product.state !== store.INITIATED)
             product.set("state", store.INITIATED);
+        storekit.refreshReceipts(); // We've asked for user password already anyway.
     });
 }
 
@@ -363,27 +365,55 @@ function storekitPurchased(transactionId, productId, originalTransactionId) {
             return;
         }
 
-        // Check if processing of this transaction isn't already in progress
-        // Exit if so.
-        if (product.transactions) {
-            for (var i = 0; i < product.transactions.length; ++i) {
-                if (transactionId === product.transactions[i])
-                    return;
-            }
-        }
+        // Let's load the receipt in all cases (some people do receipt validation with their own logic)
+        storekit.loadReceipts(function(data) {
+            var appStoreReceipt = data && data.appStoreReceipt || undefined;
+            if (product.transaction)
+                product.transaction.appStoreReceipt = appStoreReceipt;
 
-        product.transaction = {
-            type: 'ios-appstore',
-            id:   transactionId
-        };
-        if(originalTransactionId){
-            product.transaction.original_transaction_id = originalTransactionId;
+            // Check if processing of this transaction isn't already in progress
+            // Exit if so.
+            if (product.transactions) {
+                for (var i = 0; i < product.transactions.length; ++i) {
+                    if (transactionId === product.transactions[i])
+                        return;
+                }
+            }
+
+            product.transaction = {
+                type: 'ios-appstore',
+                id:   transactionId,
+                appStoreReceipt: appStoreReceipt
+            };
+            if(originalTransactionId){
+                product.transaction.original_transaction_id = originalTransactionId;
+            }
+            if (!product.transactions)
+                product.transactions = [];
+            product.transactions.push(transactionId);
+            store.log.info("ios -> transaction " + transactionId + " purchased (" + product.transactions.length + " in the queue for " + productId + ")");
+            product.set("state", store.APPROVED);
+        });
+    });
+}
+
+//! ### <a name="storekitDeferred"></a> *storekitDeferred()*
+//!
+//! Called by `storekit` when a purchase is deferred.
+//!
+//! It will set the product state to `INITIATED` and product.deferred to true.
+//!
+function storekitDeferred(productId) {
+    store.log.debug("ios -> purchase deferred " + productId);
+    store.ready(function() {
+        var product = store.get(productId);
+        if (!product) {
+            store.log.warn("ios -> Product '" + productId + "' purchase deferred. But this product is not registered anymore! How come?");
+            return;
         }
-        if (!product.transactions)
-            product.transactions = [];
-        product.transactions.push(transactionId);
-        store.log.info("ios -> transaction " + transactionId + " purchased (" + product.transactions.length + " in the queue for " + productId + ")");
-        product.set("state", store.APPROVED);
+        if (product.state !== store.INITIATED)
+            product.set("state", store.INITIATED);
+        product.set("deferred", true);
     });
 }
 
@@ -552,11 +582,20 @@ function storekitRestoreCompleted() {
     store.trigger('refresh-completed');
 }
 
-function storekitRestoreFailed(/*errorCode*/) {
-    store.log.warn("ios -> restore failed");
+function storekitRestoreFailed(errorCode) {
+    store.log.warn("ios -> restore failed with code:" + errorCode);
+
+    // expected error codes:
+    // ---
+    // store.ERR_CLIENT_INVALID      = ERROR_CODES_BASE + 5; // Client is not allowed to issue the request.
+    // store.ERR_PAYMENT_CANCELLED   = ERROR_CODES_BASE + 6; // User cancelled the request.
+    // store.ERR_PAYMENT_INVALID     = ERROR_CODES_BASE + 7; // Purchase identifier was invalid.
+    // store.ERR_PAYMENT_NOT_ALLOWED = ERROR_CODES_BASE + 8; // This device is not allowed to make the payment
+    // store.ERR_UNKNOWN             = ERROR_CODES_BASE + 10;
+
     store.error({
         code: store.ERR_REFRESH,
-        message: "Failed to restore purchases during refresh"
+        message: "Failed to restore purchases during refresh (" + errorCode + ")"
     });
     store.trigger('refresh-failed');
 }

@@ -372,6 +372,7 @@ Products object have the following fields and methods.
    - when product definitions can't be loaded from the store, you should display instead a warning like: "You cannot make purchases at this stage. Try again in a moment. Make sure you didn't enable In-App-Purchases restrictions on your phone."
  - `product.canPurchase` - Product is in a state where it can be purchased
  - `product.owned` - Product is owned
+ - `product.deferred` - Purchase has been initiated but is waiting for external action (for example, Ask to Buy on iOS)
  - `product.introPrice` - Localized introductory price, with currency symbol
  - `product.introPriceMicros` - Introductory price in micro-units (divide by 1000000 to get numeric price)
  - `product.introPricePeriod` - Duration the introductory price is available (in period-unit)
@@ -916,7 +917,7 @@ Another option is to use [Fovea's validation service](http://billing.fovea.cc/) 
 all the best practices to enhance your subscriptions and secure your transactions.
 
 
-## <a name="update"></a> *store.update*
+## <a name="update"></a> *store.update()*
 
 Refresh the historical state of purchases and price of items.
 This is required to know if a user is eligible for promotions like introductory
@@ -950,6 +951,17 @@ have a way to do just that.
 _NOTE:_ It is a required by the Apple AppStore that a "Refresh Purchases"
         button be visible in the UI.
 
+##### return value
+
+This method returns a promise-like object with the following functions:
+
+- `.completed(fn)` - Calls `fn` when the queue of previous purchases have been processed.
+  At this point, all previously owned products should be in the approved state.
+- `.finished(fn)` - Calls `fn` when all purchased in the approved state have been finished
+  or expired.
+
+In the case of the restore purchases call, you will want to hide any progress bar when the
+`finished` callback is called.
 
 ##### example usage
 
@@ -966,11 +978,20 @@ _NOTE:_ It is a required by the Apple AppStore that a "Refresh Purchases"
 
 Add a "Refresh Purchases" button to call the `store.refresh()` method, like:
 
-`<button onclick="store.refresh()">Restore Purchases</button>`
+```html
+<button onclick="restorePurchases()">Restore Purchases</button>
+```
+
+```js
+function restorePurchases() {
+   showProgress();
+   store.refresh().finished(hideProgress);
+}
+```
 
 To make the restore purchases work as expected, please make sure that
-the "approved" event listener had be registered properly,
-and in the callback `product.finish()` should be called.
+the "approved" event listener had be registered properly
+and, in the callback, `product.finish()` is called after handling.
 
 
 ## <a name="manageSubscriptions"></a>*store.manageSubscriptions()*
