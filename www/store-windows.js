@@ -530,8 +530,8 @@ store.Product = function(options) {
 
     ///  - `product.expiryDate` - Latest known expiry date for a subscription (a javascript Date)
     ///  - `product.lastRenewalDate` - Latest date a subscription was renewed (a javascript Date)
-    ///  - `product.billingPeriod` - Duration of the billing period for a subscription, in the units specified by the `billingPeriodUnit` property.
-    ///  - `product.billingPeriodUnit` - Units of the billing period for a subscription. Possible values: Minute, Hour, Day, Week, Month, Year.
+    ///  - `product.billingPeriod` - Duration of the billing period for a subscription, in the units specified by the `billingPeriodUnit` property. (_not available on iOS < 11.2_)
+    ///  - `product.billingPeriodUnit` - Units of the billing period for a subscription. Possible values: Minute, Hour, Day, Week, Month, Year. (_not available on iOS < 11.2_)
     ///  - `product.trialPeriod` - Duration of the trial period for the subscription, in the units specified by the `trialPeriodUnit` property (windows only)
     ///  - `product.trialPeriodUnit` - Units of the trial period for a subscription (windows only)
 
@@ -630,7 +630,7 @@ store.Product.prototype.verify = function() {
             }));
             var dataTransaction = getData(data, 'transaction');
             if (dataTransaction) {
-                that.transaction = Object.assign(that.transaction || {}, dataTransaction);
+                that.transaction = Object.assign({}, that.transaction || {}, dataTransaction);
                 store._extractTransactionFields(that);
                 that.trigger("updated");
             }
@@ -685,39 +685,23 @@ store.Product.prototype.verify = function() {
                     code: store.ERR_VERIFICATION_FAILED,
                     message: "Transaction verification failed: " + msg
                 });
-                if (getData(data, "latest_receipt")) {
-                    // when the server is making use of the latest_receipt,
-                    // there is no need to retry
-                    store.log.debug("verify -> server did use the latest_receipt, no retries");
-                    nRetry = 999999;
-                }
                 if (data.code === store.PURCHASE_EXPIRED) {
                     err = new store.Error({
                         code: store.ERR_PAYMENT_EXPIRED,
                         message: "Transaction expired: " + msg
                     });
-                }
-                if (data.code === store.PURCHASE_EXPIRED) {
-                    if (nRetry < 2 && store._refreshForValidation) {
-                        nRetry += 1;
-                        store._refreshForValidation(function() {
-                            delay(that, tryValidation, 300);
-                        });
-                    }
-                    else {
-                        that.set("expired", true);
-                        store.error(err);
-                        store.utils.callExternal('verify.error', errorCb, err);
-                        store.utils.callExternal('verify.done', doneCb, that);
-                        that.trigger("expired");
-                        that.set("state", store.VALID);
-                        store.utils.callExternal('verify.expired', expiredCb, that);
-                    }
+                    that.set("expired", true);
+                    store.error(err);
+                    store.utils.callExternal('verify.error', errorCb, err);
+                    store.utils.callExternal('verify.done', doneCb, that);
+                    that.trigger("expired");
+                    that.set("state", store.VALID);
+                    store.utils.callExternal('verify.expired', expiredCb, that);
                 }
                 else if (nRetry < 4) {
                     // It failed... let's try one more time. Maybe the appStoreReceipt wasn't updated yet.
                     nRetry += 1;
-                    delay(this, tryValidation, 1000 * nRetry * nRetry);
+                    delay(this, tryValidation, 1500 * nRetry * nRetry);
                 }
                 else {
                     store.log.debug("validation failed, no retrying, trigger an error");
@@ -1292,6 +1276,12 @@ var callbackId = 0;
 ///    - `oldSku`, a string with the old subscription to upgrade/downgrade on Android.
 ///      **Note**: if another subscription product is already owned that is member of
 ///      the same group, `oldSku` will be set automatically for you (see `product.group`).
+///    - `prorationMode`, a string that describe the proration mode to apply when upgrading/downgrading a subscription (with `oldSku`) on Android. See https://developer.android.com/google/play/billing/subs#change
+///      **Possible values:**
+///       - `DEFERRED` - Replacement takes effect when the old plan expires, and the new price will be charged at the same time.
+///       - `IMMEDIATE_AND_CHARGE_PRORATED_PRICE` - Replacement takes effect immediately, and the billing cycle remains the same.
+///       - `IMMEDIATE_WITHOUT_PRORATION` - Replacement takes effect immediately, and the new price will be charged on next recurrence time.
+///       - `IMMEDIATE_WITH_TIME_PRORATION` - Replacement takes effect immediately, and the remaining time will be prorated and credited to the user.
 ///    - `discount`, a object that describes the discount to apply with the purchase (iOS only):
 ///       - `id`, discount identifier
 ///       - `key`, key identifier
@@ -1918,10 +1908,12 @@ store.update = function() {};
 ///
 /// This method returns a promise-like object with the following functions:
 ///
+/// - `.cancelled(fn)` - Calls `fn` when the user cancelled the refresh request.
+/// - `.failed(fn)` - Calls `fn` when restoring purchases failed.
 /// - `.completed(fn)` - Calls `fn` when the queue of previous purchases have been processed.
 ///   At this point, all previously owned products should be in the approved state.
-/// - `.finished(fn)` - Calls `fn` when all purchased in the approved state have been finished
-///   or expired.
+/// - `.finished(fn)` - Calls `fn` when the restore is finished, i.e. it has failed, been cancelled,
+///   or all purchased in the approved state have been finished or expired.
 ///
 /// In the case of the restore purchases call, you will want to hide any progress bar when the
 /// `finished` callback is called.
@@ -1962,16 +1954,48 @@ var initialRefresh = true;
 function createPromise() {
     var events = {};
 
-    // refresh-completed is called when all owned products have been
-    // sent to the approved state.
-    store.once("", "refresh-completed", function() {
-        if (events["refresh-completed"]) return;
-        events["refresh-completed"] = true;
-        store.when().updated(checkFinished);
-        checkFinished(); // make sure this is called at least once
-    });
+    // User callbacks for each type of events
+    var callbacks = {
+        "refresh-failed": [],
+        "refresh-cancelled": [],
+        "refresh-completed": [],
+        "refresh-finished": [],
+    };
 
-    // trigger the refresh-finished event when no more products are in the
+    // Setup our own event handlers
+    store.once("", "refresh-failed", failed);
+    store.once("", "refresh-cancelled", cancelled);
+    store.once("", "refresh-completed", completed);
+    store.once("", "refresh-finished", finished);
+    store.error(error);
+
+    // Return the promise object
+    return {
+        cancelled: genPromise("refresh-cancelled"),
+        failed: genPromise("refresh-failed"),
+        completed: genPromise("refresh-completed"),
+        finished: genPromise("refresh-finished"),
+    };
+
+    // A promise function calls the callback or registers it
+    function genPromise(eventName) {
+        return function(cb) {
+            if (events[eventName])
+                cb();
+            else
+                callbacks[eventName].push(cb);
+            return this;
+        };
+    }
+
+    // Call all user callbacks for a given event
+    function callback(eventName) {
+        callbacks[eventName].forEach(function(cb) { cb(); });
+        callbacks[eventName] = [];
+    }
+
+    // Delete user callbacks for a given event
+    // Trigger the refresh-finished event when no more products are in the
     // approved state.
     function checkFinished() {
         if (events["refresh-finished"]) return;
@@ -1979,29 +2003,69 @@ function createPromise() {
         if (store.products.filter(isApproved).length === 0) {
             // done processing
             store.off(checkFinished);
-            events["refresh-finished"] = true;
-            setTimeout(function() {
-                // if "completed" triggers "finished",
-                // the setTimeout guarantees calling order
-                store.trigger("refresh-finished");
-            }, 100);
+            finish();
         }
     }
 
-    return {
-        completed: genPromise("refresh-completed"),
-        finished: genPromise("refresh-finished"),
-    };
-
-    function genPromise(eventName) {
-        return function(cb) {
-            if (events[eventName])
-                cb();
-            else
-                store.once("", eventName, cb);
-            return this;
-        };
+    // Remove base events handlers
+    function off() {
+        store.off(cancelled);
+        store.off(completed);
+        store.off(failed);
+        store.off(checkFinished);
+        store.off(error);
     }
+
+    // Fire a base event
+    function fire(eventName) {
+        if (events[eventName]) return false;
+        events[eventName] = true;
+        callback(eventName);
+        return true;
+    }
+
+    // Fire the refresh-finished event
+    function finish() {
+        off();
+        if (events["refresh-finished"]) return;
+        events["refresh-finished"] = true;
+        // setTimeout guarantees calling order
+        setTimeout(function() {
+            store.trigger("refresh-finished");
+        }, 100);
+    }
+
+    // refresh-cancelled called when the user cancelled the password popup
+    function cancelled() {
+        fire("refresh-cancelled");
+        finish();
+    }
+
+    // refresh-cancelled called when restore purchases couldn't complete
+    // (can't connect to store or user not allowed to make purchases)
+    function failed() {
+        fire("refresh-failed");
+        finish();
+    }
+
+    function error() {
+        fire("refresh-failed");
+        finish();
+    }
+
+    // refresh-completed is called when all owned products have been
+    // sent to the approved state.
+    function completed() {
+        if (fire("refresh-completed")) {
+            store.when().updated(checkFinished);
+            checkFinished(); // make sure this is called at least once
+        }
+    }
+
+    function finished() {
+        callback("refresh-finished");
+    }
+
 }
 
 store.refresh = function() {
@@ -2841,7 +2905,7 @@ if (typeof Object.assign != 'function') {
     };
 }
 
-store.version = '10.2.0';
+store.version = '10.3.0';
 /*
  * Copyright (C) 2012-2013 by Guillaume Charhon
  * Modifications 10/16/2013 by Brian Thurlow
@@ -3428,11 +3492,40 @@ store.extendAdditionalData = function(product) {
     // If we're ordering a subscription, check if another one in the
     // same group is already purchased, set `oldSku` in that case (so
     // it's replaced).
-    if (product.group && !a.oldSku) {
-        store.getGroup(product.group).forEach(function(otherProduct) {
-            if (isPurchased(otherProduct))
-                a.oldSku = otherProduct.id;
-        });
+    if (product.group) {
+        if (!a.oldPurchaseToken && !a.oldSku) {
+            // If neither of the oldPurchaseToken and oldSku are specified,
+            // look in the product group for an owned product.
+            // Automatically set oldSku and oldPurchaseToken if one is found.
+            store.getGroup(product.group).forEach(function(otherProduct) {
+                if (isPurchased(otherProduct)) {
+                    a.oldSku = otherProduct.id;
+                    a.oldPurchaseToken =
+                        otherProduct.transaction ?
+                        otherProduct.transaction.purchaseToken :
+                        null;
+                }
+            });
+        }
+        else if (a.oldSku && !a.oldPurchaseToken) {
+            // If only oldSku is set, automatically set oldPurchaseToken.
+            var otherProduct = store.get(a.oldSku);
+            if (otherProduct && otherProduct.transaction) {
+                a.oldPurchaseToken = otherProduct.transaction.purchaseToken;
+            }
+        }
+        else if (a.oldPurchaseToken && !a.oldSku) {
+            // If only oldPurchaseToken is set, automatically set oldSku.
+            store.products.forEach(function(otherProduct) {
+                var otherPurchaseToken =
+                    otherProduct.transaction ?
+                    otherProduct.transaction.purchaseToken :
+                    null;
+                if (otherPurchaseToken == a.oldPurchaseToken) {
+                    a.oldSku = otherProduct.id;
+                }
+            });
+        }
     }
 };
 

@@ -282,7 +282,9 @@ function storekitLoaded(validProducts, invalidProductIds) {
     setTimeout(function() {
         loading = false;
         loaded = true;
-        var ready = store.ready.bind(store, true);
+        var ready = function() {
+            store.ready(true);
+        };
         store.update(ready, ready, true);
     }, 1);
 }
@@ -343,7 +345,7 @@ function storekitPurchasing(productId) {
         }
         if (product.state !== store.INITIATED)
             product.set("state", store.INITIATED);
-        storekit.refreshReceipts(); // We've asked for user password already anyway.
+        // storekit.refreshReceipts(); // We've asked for user password already anyway.
     });
 }
 
@@ -597,7 +599,10 @@ function storekitRestoreFailed(errorCode) {
         code: store.ERR_REFRESH,
         message: "Failed to restore purchases during refresh (" + errorCode + ")"
     });
-    store.trigger('refresh-failed');
+    if (errorCode === store.ERR_PAYMENT_CANCELLED)
+        store.trigger('refresh-cancelled');
+    else
+        store.trigger('refresh-failed');
 }
 
 function storekitDownloadActive(transactionIdentifier, productId, progress, timeRemaining) {
@@ -709,9 +714,11 @@ store.update = function(successCb, errorCb, skipLoad) {
 
 setInterval(function() {
     var now = +new Date();
+    // finds a product that is both owned and expired more than 1 minute ago
     var expired = store.products.find(function(product) {
         return product.owned && now > +product.expiryDate + 60000;
     });
+    // if one is found, refresh purchases using the validator (if setup)
     if (expired) {
         store.update();
     }
