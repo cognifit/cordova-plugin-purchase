@@ -59,6 +59,7 @@ public class PurchasePlugin
   /** A reference to BillingClient. */
   private BillingClient mBillingClient;
 
+  private String mBillingKey;
   private List<String> mInAppSkus;
   private List<String> mSubsSkus;
   private final List<Purchase> mPurchases = new ArrayList<>();
@@ -141,9 +142,10 @@ public class PurchasePlugin
     try {
       // Action selector
       if ("init".equals(action)) {
-        final List<String> inAppSkus = parseStringArrayAtIndex(data, 1);
-        final List<String> subsSkus = parseStringArrayAtIndex(data, 2);
-        init(inAppSkus, subsSkus);
+        final String billingKey = data.getString(0);
+        final List<String> inAppSkus = parseStringArrayAtIndex(data, 2);
+        final List<String> subsSkus = parseStringArrayAtIndex(data, 3);
+        init(billingKey, inAppSkus, subsSkus);
       } else if ("getAvailableProducts".equals(action)) {
         getAvailableProducts();
       } else if ("getPurchases".equals(action)) {
@@ -181,32 +183,17 @@ public class PurchasePlugin
   }
 
   private String getPublicKey() {
-    int billingKeyFromParam =
-      cordova.getActivity().getResources().getIdentifier(
-          "billing_key_param",
-          "string",
-          cordova.getActivity().getPackageName());
-    if (billingKeyFromParam > 0) {
-      final String ret = cordova.getActivity().getString(billingKeyFromParam);
-      if (ret.length() > 0) {
-        return ret;
-      }
-    }
-
-    int billingKeyIdentifier =
-      cordova.getActivity().getResources().getIdentifier(
-          "billing_key",
-          "string",
-          cordova.getActivity().getPackageName());
-    return cordova.getActivity().getString(billingKeyIdentifier);
+    return mBillingKey;
   }
 
   // Initialize the plugin
   private void init(
+      final String billingKey,
       final List<String> inAppSkus,
       final List<String> subsSkus) {
 
     Log.d(mTag, "init()");
+    mBillingKey = billingKey;
     mInAppSkus = inAppSkus;
     mSubsSkus = subsSkus;
 
