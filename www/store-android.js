@@ -637,12 +637,7 @@ store.Product.prototype.verify = function() {
                 that.trigger("updated");
             }
             if (success) {
-                if (that.expired)
-                    that.set("expired", false);
                 store.log.debug("verify -> success: " + JSON.stringify(data));
-                store.utils.callExternal('verify.success', successCb, that, data);
-                store.utils.callExternal('verify.done', doneCb, that);
-                that.trigger("verified");
 
                 // Process the list of products that are ineligible
                 // for introductory prices.
@@ -672,13 +667,24 @@ store.Product.prototype.verify = function() {
                     });
                 }
                 if (data && data.collection && data.collection.forEach) {
+                    // new behavior: the validator sets products state in the collection
+                    // (including expiry status)
                     data.collection.forEach(function(purchase) {
                         var p = store.get(purchase.id);
                         if (p) {
                             p.set(purchase);
                         }
                     });
+
                 }
+                else if (that.expired) {
+                    // old behavior: a valid receipt means the subscription isn't expired.
+                    that.set("expired", false);
+                }
+
+                store.utils.callExternal('verify.success', successCb, that, data);
+                store.utils.callExternal('verify.done', doneCb, that);
+                that.trigger("verified");
             }
             else {
                 store.log.debug("verify -> error: " + JSON.stringify(data));
@@ -2131,6 +2137,21 @@ store.refresh = function() {
 /// ```
 ///
 
+///
+/// ## <a name="redeem"></a>*store.redeem()*
+///
+/// Redeems a promotional offer from within the app.
+///
+/// * On iOS, calling `store.redeem()` will open the Code Redemption Sheet.
+///   * See the [offer codes documentation](https://developer.apple.com/app-store/subscriptions/#offer-codes) for details.
+/// * This call does nothing on Android and Microsoft UWP.
+///
+/// ##### example usage
+///
+/// ```js
+///    store.redeem();
+/// ```
+
 (function(){
 
 
@@ -2347,7 +2368,18 @@ store.Product.prototype.set = function(key, value) {
             value = new Date(value);
         }
         if (key === 'isExpired' && value === true && this.owned) {
+            this.set('owned', false);
             this.set('state', store.VALID);
+            this.set('expired', true);
+            this.trigger('expired');
+        }
+        if (key === 'isExpired' && value === false && !this.owned) {
+            this.set('expired', false);
+            if (this.state !== store.APPROVED) {
+                // user have to "finish()" to own an approved transaction
+                // in other cases, we can safely set the OWNED state.
+                this.set('state', store.OWNED);
+            }
         }
         this[key] = value;
         if (key === 'state')
@@ -2907,7 +2939,7 @@ if (typeof Object.assign != 'function') {
     };
 }
 
-store.version = '10.3.0';
+store.version = '10.5.0';
 /*
  * Copyright (C) 2012-2013 by Guillaume Charhon
  * Modifications 10/16/2013 by Brian Thurlow
@@ -3817,6 +3849,8 @@ function getDeveloperPayload(product) {
     store.manageBilling = function() {
       store.inappbilling.manageBilling();
     };
+
+    store.redeem = function() {};
 
     store.requireAcknowledgment = true;
 

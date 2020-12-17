@@ -131,8 +131,10 @@ declare namespace IapStore {
     update(): void;
     manageSubscriptions(): void;
     manageBilling(): void;
+    redeem(): void;
     off(callback: Function): void;
     order(id: string, additionalData?: null | IAdditionalData): void;
+    applicationUsername?: string | () => string;
   }
 
   export type TransactionType = 'ios-appstore' | 'android-playstore' | 'windows-store-transaction';
