@@ -312,6 +312,8 @@ store.sandbox = false;
 /// ## Constants
 ///
 
+/*///*/     store.billingKey = 'BILLING_KEY';
+
 ///
 /// ### product types
 ///
@@ -2996,13 +2998,11 @@ InAppBilling.prototype.init = function (success, fail, options, skus, inAppSkus,
     var listener = this.listener.bind(this);
     cordova.exec(listener, function(err) {}, "InAppBillingPlugin", "setListener", []);
 
+    var args = [store.billingKey];
 	if (hasSKUs) {
-		cordova.exec(success, errorCb(fail), "InAppBillingPlugin", "init", [skus, inAppSkus, subsSkus]);
+    	args.push.apply(args, [skus, inAppSkus, subsSkus]);
     }
-	else {
-        //No SKUs
-		cordova.exec(success, errorCb(fail), "InAppBillingPlugin", "init", []);
-    }
+    cordova.exec(success, errorCb(fail), "InAppBillingPlugin", "init", args);
 };
 InAppBilling.prototype.listener = function (msg) {
     // Handle changes to purchase that are being notified
@@ -3199,6 +3199,72 @@ function iabReady() {
         });
     });
 }
+
+/** START OF ANDROID HACK **/
+
+/** The following functions allow us to work around the fact that Android setups all in-app purchases when the store is initialized.
+ * In our App this means that only the first component that setups products will have access to the item's prices and data. Subsequent
+ * calls to register products will not work as the native code will not have the identifiers. See AppStoreService to see how these functions
+ * are used. These are used only on Android devices, even if the code is added to the Windows OS version of this plugin.
+ **/
+
+store.androidAddProductWithId = function (productId, callback) {
+    var identifier = productId.toLowerCase();
+
+    cordova.exec(function() {
+        if (inAppSkus.indexOf(identifier) < 0) {
+            inAppSkus.push(identifier);
+        }
+        if (typeof callback === 'function') {
+            callback();
+        }
+    }, undefined, "InAppBillingPlugin", "addProduct", [identifier, false]);
+};
+
+store.androidAddSubscriptionWithId = function (productId, callback) {
+    var identifier = productId.toLowerCase();
+    cordova.exec(function() {
+        if (subsSkus.indexOf(identifier) < 0) {
+            subsSkus.push(identifier);
+        }
+        if (typeof callback === 'function') {
+            callback();
+        }
+    }, undefined, "InAppBillingPlugin", "addProduct", [identifier, true]);
+};
+
+store.androidFetchProductsAndSubscriptions = function (callback) {
+     store.inappbilling.getAvailableProducts(function (validProducts) {
+        iabLoaded(validProducts);
+        if (typeof callback === 'function') {
+            callback(validProducts);
+        }
+     });
+};
+
+store.knowsProductWithId = function (productId) {
+    var identifier = productId.toLowerCase();
+    return inAppSkus.indexOf(identifier) >= 0 && typeof store.get(identifier) !== 'undefined' && typeof store.get(identifier).price === 'string';
+};
+
+store.knowsSubscriptionWithId = function (productId) {
+    var identifier = productId.toLowerCase();
+    return subsSkus.indexOf(identifier) >= 0 && typeof store.get(identifier) !== 'undefined' && typeof store.get(identifier).price === 'string';
+};
+
+/** END OF ANDROID HACK **/
+
+store.androidFetchProducts = function () {
+    iabReady();
+};
+
+store.knowsProductWithId = function (productId) {
+    return inAppSkus.filter(function (item) { return item.productId === productId; }).length > 0;
+};
+
+store.knowsSubscriptionWithId = function (productId) {
+    return subsSkus.filter(function (item) { return item.productId === productId; }).length > 0;
+};
 
 function iabPurchaseConsumed(purchase) {
   store.log.debug("iabPurchaseConsumed: " + JSON.stringify(purchase));
