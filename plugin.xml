@@ -28,9 +28,12 @@ SOFTWARE.
     xmlns:android="http://schemas.android.com/apk/res/android"
     version="10.3.0">
 
-    <name>Purchase</name>
-	<description>Cordova Purchase plugin for iOS (AppStore), Android (PlayStore) and Windows</description>
-    <engines>
+     <name>CogniFit's fork of cordova-plugin-purchase</name>
+	<description>
+		Cordova Purchase plugin for iOS (AppStore), Android (PlayStore) and Windows
+		See original project at https://github.com/j3k0/cordova-plugin-purchase
+	</description>
+	<engines>
         <engine name="cordova" version=">=6.0.0" />
         <engine name="cordova-android" version=">=4.0.0" />
     </engines>
