@@ -1319,7 +1319,7 @@ store.order = function(pid, additionalData) {
     }
 
     var a; // short name for additionalData
-    if (additionalData) {
+    if (additionalData && typeof additionalData === 'object') {
         a = p.additionalData = Object.assign({}, additionalData);
     }
     else {
@@ -2939,7 +2939,7 @@ if (typeof Object.assign != 'function') {
     };
 }
 
-store.version = '10.5.0';
+store.version = '10.5.1';
 /*
  * Copyright (C) 2012-2013 by Guillaume Charhon
  * Modifications 10/16/2013 by Brian Thurlow
