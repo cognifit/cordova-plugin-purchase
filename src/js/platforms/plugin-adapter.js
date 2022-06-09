@@ -210,6 +210,7 @@ function iabLoaded(validProducts) {
             };
 
             var trimTitle = function (title) {
+              if (!title) return 'Invalid product';
               return title.split('(').slice(0, -1).join('(').replace(/ $/, '');
             };
 
@@ -223,6 +224,14 @@ function iabLoaded(validProducts) {
             var introPricePaymentMode = null;
             if (vp.freeTrialPeriod) {
                 introPricePaymentMode = 'FreeTrial';
+                try {
+                    introPricePeriodUnit = normalizeISOPeriodUnit(vp.freeTrialPeriod);
+                    introPricePeriodCount = normalizeISOPeriodCount(vp.freeTrialPeriod);
+                    introPricePeriod = introPricePeriodCount;
+                }
+                catch (e) {
+                    store.log.warn('Failed to parse free trial period: ' + vp.freeTrialPeriod);
+                }
             }
             else if (vp.introductoryPrice) {
                 if (vp.introductoryPrice < vp.price && subscriptionPeriod === introPriceSubscriptionPeriod) {
@@ -443,7 +452,7 @@ document.addEventListener("online", function() {
 
 
 store.extendAdditionalData = function(product) {
-    var a = product.additionalData;
+    var a = product.additionalData || {};
 
     //  - `accountId` : **string**
     //    - _Default_: `md5(applicationUsername)`
@@ -534,5 +543,11 @@ function getDeveloperPayload(product) {
         applicationUsernameMD5: store.utils.md5(applicationUsername),
     });
 }
+
+// callback: function(status: "UserCanceled" | "OK" | "UnknownProduct")
+store.launchPriceChangeConfirmationFlow = function(productId, callback) {
+    store.inappbilling.onPriceChangeConfirmationResult = callback;
+    store.inappbilling.launchPriceChangeConfirmationFlow(productId);
+};
 
 })();

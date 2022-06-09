@@ -19,6 +19,8 @@ import com.android.billingclient.api.BillingFlowParams;
 import com.android.billingclient.api.BillingResult;
 import com.android.billingclient.api.ConsumeParams;
 import com.android.billingclient.api.ConsumeResponseListener;
+import com.android.billingclient.api.PriceChangeConfirmationListener;
+import com.android.billingclient.api.PriceChangeFlowParams;
 import com.android.billingclient.api.Purchase.PurchasesResult;
 import com.android.billingclient.api.Purchase;
 import com.android.billingclient.api.PurchasesUpdatedListener;
@@ -27,6 +29,7 @@ import com.android.billingclient.api.SkuDetailsParams;
 import com.android.billingclient.api.SkuDetailsResponseListener;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -179,6 +182,9 @@ public class PurchasePlugin
         }
 
         callSuccess();
+      } else if ("launchPriceChangeConfirmationFlow".equals(action)) {
+        final String sku = data.getString(0);
+        launchPriceChangeConfirmationFlow(sku);
       } else {
         // No handler for the action
         isValidAction = false;
@@ -381,7 +387,7 @@ public class PurchasePlugin
 
   private Purchase findPurchaseBySku(final String sku) {
     for (Purchase p : mPurchases) {
-      if (p.getSku().equals(sku))
+      if (p.getSkus().contains(sku))
         return p;
     }
     return null;
@@ -493,18 +499,19 @@ public class PurchasePlugin
     // NOTE: developerPayload isn't supported anymore.
     // https://developer.android.com/google/play/billing/developer-payload
 
+    // NOTE: oldSku and oldPurchasedSkus have been removed in billing library v4
     // Specify the SKU that the user is upgrading or downgrading from.
-    String oldSku = null;
-    if (additionalData.has("oldPurchasedSkus")) {
-      final JSONArray list = new JSONArray(
-          additionalData.getString("oldPurchasedSkus"));
-      int len = list.length();
-      if (len > 0)
-        oldSku = list.get(0).toString();
-    }
-    else if (additionalData.has("oldSku")) {
-      oldSku = additionalData.getString("oldSku");
-    }
+    // String oldSku = null;
+    // if (additionalData.has("oldPurchasedSkus")) {
+    //   final JSONArray list = new JSONArray(
+    //       additionalData.getString("oldPurchasedSkus"));
+    //   int len = list.length();
+    //   if (len > 0)
+    //     oldSku = list.get(0).toString();
+    // }
+    // else if (additionalData.has("oldSku")) {
+    //   oldSku = additionalData.getString("oldSku");
+    // }
 
     String oldPurchaseToken = null;
     if (additionalData.has("oldPurchaseToken")) {
@@ -539,6 +546,11 @@ public class PurchasePlugin
       : null;
 
     BillingFlowParams.Builder params = BillingFlowParams.newBuilder();
+
+    BillingFlowParams.SubscriptionUpdateParams.Builder subscriptionUpdateParams =
+      BillingFlowParams.SubscriptionUpdateParams.newBuilder();
+    Boolean hasSubscriptionUpdateParams = false;
+
     final SkuDetails skuDetails = mSkuDetails.get(skuId);
     if (skuDetails == null) {
       Log.d(mTag, "buy() -> Failed: Product not registered: " + skuId);
@@ -547,9 +559,16 @@ public class PurchasePlugin
     }
     Log.d(mTag, "buy() -> setSkuDetails");
     params.setSkuDetails(skuDetails);
-    if (oldSku != null && oldPurchaseToken != null) {
-      Log.d(mTag, "buy() -> setOldSku");
-      params.setOldSku(oldSku, oldPurchaseToken);
+    // NOTE: This has been removed in billing library v4, use oldPurchaseToken now.
+    // if (oldSku != null && oldPurchaseToken != null) {
+    //   Log.d(mTag, "buy() -> setOldSku");
+    //   params.setOldSku(oldSku, oldPurchaseToken);
+    // }
+
+    if (oldPurchaseToken != null) {
+      Log.d(mTag, "buy() -> setOldSkuPurchaseToken");
+      subscriptionUpdateParams.setOldSkuPurchaseToken(oldPurchaseToken);
+      hasSubscriptionUpdateParams = true;
     }
 
     // accountId and profileId are used to detect fraud.
@@ -582,14 +601,21 @@ public class PurchasePlugin
       : null;
     if (prorationMode != null) {
       if ("IMMEDIATE_WITH_TIME_PRORATION".equals(prorationMode))
-        params.setReplaceSkusProrationMode(BillingFlowParams.ProrationMode.IMMEDIATE_WITH_TIME_PRORATION);
+        subscriptionUpdateParams.setReplaceSkusProrationMode(BillingFlowParams.ProrationMode.IMMEDIATE_WITH_TIME_PRORATION);
       else if ("IMMEDIATE_AND_CHARGE_PRORATED_PRICE".equals(prorationMode))
-        params.setReplaceSkusProrationMode(BillingFlowParams.ProrationMode.IMMEDIATE_AND_CHARGE_PRORATED_PRICE);
+        subscriptionUpdateParams.setReplaceSkusProrationMode(BillingFlowParams.ProrationMode.IMMEDIATE_AND_CHARGE_PRORATED_PRICE);
       else if ("IMMEDIATE_WITHOUT_PRORATION".equals(prorationMode))
-        params.setReplaceSkusProrationMode(BillingFlowParams.ProrationMode.IMMEDIATE_WITHOUT_PRORATION);
-      else if ("DEFERRED".equals("prorationMode"))
-        params.setReplaceSkusProrationMode(BillingFlowParams.ProrationMode.DEFERRED);
+        subscriptionUpdateParams.setReplaceSkusProrationMode(BillingFlowParams.ProrationMode.IMMEDIATE_WITHOUT_PRORATION);
+      else if ("DEFERRED".equals(prorationMode))
+        subscriptionUpdateParams.setReplaceSkusProrationMode(BillingFlowParams.ProrationMode.DEFERRED);
+      else if ("IMMEDIATE_AND_CHARGE_FULL_PRICE".equals(prorationMode))
+        subscriptionUpdateParams.setReplaceSkusProrationMode(BillingFlowParams.ProrationMode.IMMEDIATE_AND_CHARGE_FULL_PRICE);
     }
+
+    if (hasSubscriptionUpdateParams) {
+      params.setSubscriptionUpdateParams(subscriptionUpdateParams.build());
+    }
+
     return params.build();
   }
 
@@ -623,8 +649,7 @@ public class PurchasePlugin
             "Failed to execute service request. " + format(getLastResult()));
         return;
       }
-      Log.d(mTag, "initiatePurchaseFlow() -> launchBillingFlow."
-          + " Replace old SKU? " + (params.getOldSku() != null));
+      Log.d(mTag, "initiatePurchaseFlow() -> launchBillingFlow.");
       cordova.setActivityResultCallback(this);
       mBillingClient.launchBillingFlow(cordova.getActivity(), params);
     });
@@ -717,6 +742,35 @@ public class PurchasePlugin
     }
   }
 
+  public void launchPriceChangeConfirmationFlow(String skuId) {
+    Log.d(mTag, "launchPriceChangeConfirmationFlow(" + skuId + ")");
+    final SkuDetails skuDetails = mSkuDetails.get(skuId);
+    if (skuDetails == null) {
+      Log.d(mTag, "launchPriceChangeConfirmationFlow() -> Failed: Product not registered: " + skuId);
+      sendToListener("onPriceChangeConfirmationResultUnknownSku", new JSONObject());
+      return;
+    }
+    PriceChangeFlowParams priceChangeFlowParams = PriceChangeFlowParams.newBuilder()
+      .setSkuDetails(skuDetails)
+      .build();
+    mBillingClient.launchPriceChangeConfirmationFlow(cordova.getActivity(),
+      priceChangeFlowParams,
+      new PriceChangeConfirmationListener() {
+        @Override
+        public void onPriceChangeConfirmationResult(BillingResult result) {
+          final int responseCode = result.getResponseCode();
+          if (responseCode == BillingResponseCode.OK) {
+            // User has confirmed the price change.
+            sendToListener("onPriceChangeConfirmationResultOK", new JSONObject());
+          } else if (responseCode == BillingResponseCode.USER_CANCELED) {
+            // User hasn't confirmed the price change and should retain
+            // access until the end of the current billing cycle.
+            sendToListener("onPriceChangeConfirmationResultUserCanceled", new JSONObject());
+          }
+        }
+      });
+  }
+
   // Called when the activity receives a new intent.
   @Override
   public void onNewIntent(Intent intent) {
@@ -729,12 +783,20 @@ public class PurchasePlugin
     Log.d(mTag, "onStop()");
   }
 
+  // Last time the app queried for purchases when onStart was triggered.
+  // We make sure to refresh every 24h (but not more).
+  private long mLastQueryOnStart = 0;
+
   // Called when the activity is becoming visible to the user.
   @Override
   public void onStart() {
     Log.d(mTag, "onStart()");
     if (mBillingClient != null) {
-        queryPurchases();
+        long now = Calendar.getInstance().getTimeInMillis();
+        if (now - mLastQueryOnStart > 24 * 60 * 60 * 1000) {
+            mLastQueryOnStart = Calendar.getInstance().getTimeInMillis();
+            queryPurchases();
+        }
     }
   }
 
@@ -860,6 +922,7 @@ public class PurchasePlugin
   }
 
   private void callError(final int code, final String msg) {
+    Log.d(mTag, "callError({code:" + code + ", msg:\"" + msg + "\")");
     if (mCallbackContext == null) {
       return;
     }
