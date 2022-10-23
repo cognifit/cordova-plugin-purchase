@@ -7,6 +7,7 @@
 #import "InAppPurchase.h"
 #include <stdio.h>
 #include <stdlib.h>
+#import <objc/runtime.h>
 
 /*
  * Plugin state variables
@@ -637,6 +638,17 @@ static NSString *priceLocaleCurrencyCode(NSLocale *priceLocale) {
         stringWithFormat:@"window.storekit.updatedTransactionCallback.apply(window.storekit, %@)",
         [callbackArgs JSONSerialize]];
     [self.commandDelegate evalJs:js];
+    
+    // send to the TrackersPlugin, if available
+    Class trackersPluginClass = NSClassFromString(@"TrackersPlugin");
+    SEL methodSelector = NSSelectorFromString(@"trackPurchaseWithTransactionAndProduct:");
+    SKProduct *product = [self.products objectForKey:transaction.payment.productIdentifier];
+    
+    if ([trackersPluginClass respondsToSelector:methodSelector] && product != nil) {
+        IMP imp = [trackersPluginClass methodForSelector:methodSelector];
+        void (*nonLeakingFunction)(Class, SEL, UNNotificationResponse *) = (void *)imp;
+        nonLeakingFunction(trackersPluginClass, methodSelector, @[transaction, product]);
+    }
 }
 
 - (void) finishTransaction: (CDVInvokedUrlCommand*)command {
