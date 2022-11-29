@@ -185,6 +185,15 @@ public class PurchasePlugin
         Intent browserIntent = new Intent(Intent.ACTION_VIEW,
                 Uri.parse("http://play.google.com/store/account/subscriptions"));
         cordova.getActivity().startActivity(browserIntent);
+      } else if ("addProduct".equals(action)) {
+        final String productIdentifier = data.getString(0);
+        final boolean isSubscription = data.getBoolean(1);
+
+        if (isSubscription && !this.mSubsProductIds.contains((productIdentifier))) {
+          this.mSubsProductIds.add(productIdentifier);
+        } else if (!isSubscription && !this.mInAppProductIds.contains(productIdentifier)) {
+          this.mInAppProductIds.add(productIdentifier);
+        }
       } else {
         // No handler for the action
         isValidAction = false;
