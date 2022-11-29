@@ -154,8 +154,8 @@ public class PurchasePlugin
       // Action selector
       if ("init".equals(action)) {
         final String billingKey = data.getString(0);
-        final List<String> inAppSkus = parseStringArrayAtIndex(data, 1);
-        final List<String> subsSkus = parseStringArrayAtIndex(data, 2);
+        final List<String> inAppSkus = parseStringArrayAtIndex(data, 2);
+        final List<String> subsSkus = parseStringArrayAtIndex(data, 3);
         init(billingKey, inAppSkus, subsSkus);
       } else if ("getAvailableProducts".equals(action)) {
         getAvailableProducts();
