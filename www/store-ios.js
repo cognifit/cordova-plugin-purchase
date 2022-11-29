@@ -422,6 +422,13 @@ var ERROR_CODES_BASE = 6777000;
 ///
 /*///*/     store.APPLICATION = "application";
 
+///
+/// ### recurrence modes
+///
+/*///*/     store.NON_RECURRING = "NON_RECURRING";
+/*///*/     store.FINITE_RECURRING = "FINITE_RECURRING";
+/*///*/     store.INFINITE_RECURRING = "INFINITE_RECURRING";
+
 })();
 (function() {
 
@@ -545,11 +552,19 @@ store.Product = function(options) {
     ///  - `product.downloaded` - Non-consumable content has been successfully downloaded for this product
     this.downloaded = options.downloaded;
 
-    ///  - `product.additionalData` - additional data possibly required for product purchase
+    ///  - `product.additionalData` - Additional data possibly required for product purchase
     this.additionalData = options.additionalData || null;
 
     ///  - `product.transaction` - Latest transaction data for this product (see [transactions](#transactions)).
     this.transaction = null;
+
+    /// - `product.offers` - List of offers available for purchasing a product.
+    ///     - when not null, it contains an array of virtual product identifiers, you can fetch those virtual products as usual, with `store.get(id)`.
+    this.offers = null;
+
+    /// - `product.pricingPhases` - Since v11, when a product is paid for in multiple phases (for example, trial followed by paid periods), this contains the list of phases.
+    ///     - Example: [{"price":"€1.19","priceMicros":1190000,"currency":"EUR","billingPeriod":"P1W","billingCycles":0,"recurrenceMode":"INFINITE_RECURRING","paymentMode":"PayAsYouGo"}]
+    this.pricingPhases = null;
 
     ///  - `product.expiryDate` - Latest known expiry date for a subscription (a javascript Date)
     ///  - `product.lastRenewalDate` - Latest date a subscription was renewed (a javascript Date)
@@ -2176,7 +2191,7 @@ store.refresh = function() {
 /// ```
 
 ///
-/// ## <a name="launchPriceChangeConfirmationFlow"></a>*store.launchPriceChangeConfirmationFlow(callback)*
+/// ## <a name="launchPriceChangeConfirmationFlow"></a>*store.launchPriceChangeConfirmationFlow(productId, callback)*
 ///
 /// Android only: display a generic dialog notifying the user of a subscription price change.
 ///
@@ -2187,9 +2202,10 @@ store.refresh = function() {
 /// ##### example usage
 ///
 /// ```js
-///    store.launchPriceChangeConfirmationFlow(function(status) {
+///    store.launchPriceChangeConfirmationFlow(function('product_id', status) {
 ///      if (status === "OK") { /* approved */ }
 ///      if (status === "UserCanceled") { /* dialog canceled by user */ }
+///      if (status === "UnknownProduct") { /* trying to update price of an unregistered product */ }
 ///    }));
 /// ```
 
@@ -4043,7 +4059,9 @@ store.manageBilling = function() {
     storekit.manageBilling();
 };
 
-store.launchPriceChangeConfirmationFlow = function(callback) {};
+store.launchPriceChangeConfirmationFlow = function(productId, callback) {
+    callback('UserCanceled');
+};
 
 /// store.redeemCode({ type: 'subscription_offer_code' });
 store.redeem = function() {

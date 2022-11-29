@@ -108,6 +108,9 @@ declare namespace IapStore {
     developerPayload?: string;
     /** A object that describes the discount to apply with the purchase (iOS only):  */
     discount: IDiscount;
+
+    /** A string with the offer token, as found `product.offers[].token` */
+    offerToken?: string;
   }
 
   export interface IDiscount {
@@ -245,6 +248,13 @@ declare namespace IapStore {
     /** Validation Error: More data is needed from the app to complete the validation request */
     NEED_MORE_DATA: number;
 
+    /** Payment recurs for a fixed number of billing period set in `paymentPhase.cycles`. */
+    FINITE_RECURRING: RecurrenceMode;
+    /** Payment recurs for infinite billing periods unless cancelled. */
+    INFINITE_RECURRING: RecurrenceMode;
+    /** A one time charge that does not repeat. */
+    NON_RECURRING: RecurrenceMode;
+
     /**
      * The verbosity property defines how much you want store.js to write on the console.
      *
@@ -298,6 +308,19 @@ declare namespace IapStore {
      * https://github.com/j3k0/cordova-plugin-purchase/blob/master/doc/api.md#storedevelopername
      */
     developerName?: string;
+
+    /**
+     * Let the plugin operate in compatibility mode by filling in deprecated fields.
+     *
+     * By default, the plugin does not attempt to work in compatibility mode.
+     *
+     * Set to `10` to use the legacy product price definition instead of the more generic `offers` property.
+     * Set to `9` to keep the old names for intro period period definitions.
+     *
+     * NOTE: the plugin might not be able to describe all Google Play subscription plans in compatibility mode.
+     * (when or non backward-compatible pricing modes are being used).
+     */
+    compatibility?: number;
 
     disableHostedContent: boolean;
 
@@ -463,14 +486,17 @@ declare namespace IapStore {
   export interface ITransaction {
     /** Transaction identifier */
     id?: string;
-    // Android only
+    /** Payment processing platform */
     type: TransactionType;
     /** @deprecated */
     developerPayload?: string;
+    /** Purchase token on Google Play */
     purchaseToken?: string;
+    /** Receipt data on Google Play */
     receipt?: string;
-    // iOS only
+    /** Receipt data on iOS >= 7 */
     appStoreReceipt?: string;
+    /** Receipt data iOS <7 only */
     transactionReceipt?: string;
   }
 
@@ -495,6 +521,15 @@ declare namespace IapStore {
   export type IPeriodUnit = "Minute" | "Hour" | "Day" | "Week" | "Month" | "Year";
 
   /**
+   * Type of recurring payment
+   *
+   * - FINITE_RECURRING: Payment recurs for a fixed number of billing period set in `paymentPhase.cycles`.
+   * - INFINITE_RECURRING: Payment recurs for infinite billing periods unless cancelled.
+   * - NON_RECURRING: A one time charge that does not repeat.
+   */
+  export type RecurrenceMode = "NON_RECURRING" | "FINITE_RECURRING" | "INFINITE_RECURRING";
+
+  /**
    * In-App Product or Application Bundle
    *
    * Most events methods give you access to a product object.
@@ -502,14 +537,29 @@ declare namespace IapStore {
   export interface IStoreProduct extends IRegisterRequest {
     /** Additional data possibly required for product purchase */
     additionalData: any;
-    /** Duration of the billing period for a subscription, in the units specified by the billingPeriodUnit property. (not available on iOS < 11.2) */
+
+    /** Duration of the billing period for a subscription, in the units specified by the billingPeriodUnit property. (not available on iOS < 11.2)
+     *
+     * @deprecated Use pricingPhases instead */
     billingPeriod?: number;
-    /** Units of the billing period for a subscription. Possible values: Minute, Hour, Day, Week, Month, Year. (not available on iOS < 11.2) */
-    billingPeriodUnit: IPeriodUnit;
+    /** Units of the billing period for a subscription. Possible values: Minute, Hour, Day, Week, Month, Year. (not available on iOS < 11.2)
+     *
+     * @deprecated Use pricingPhases instead */
+    billingPeriodUnit?: IPeriodUnit;
+    /** ISO 8601 duration of the billing period (https://en.wikipedia.org/wiki/ISO_8601#Durations)
+     *
+     * @deprecated Use pricingPhases instead */
+    billingPeriodISO?: string;
+    /** Number of recurrence cycles (if recurrenceMode is FINITE_RECURRING)
+     *
+     * @deprecated Use pricingPhases instead */
+    billingCycles?: number;
+
     /** Product is in a state where it can be purchased */
     canPurchase: boolean;
     /** Country code. Available only on iOS */
     countryCode: string;
+
     /** Currency code */
     currency?: string;
     /** Purchase has been initiated but is waiting for external action (for example, Ask to Buy on iOS) */
@@ -518,49 +568,98 @@ declare namespace IapStore {
     description: string;
     /** Array of discounts available for the product. */
     discounts?: IStoreDiscount[];
+
     /** Product is downloading non-consumable content */
     downloading: boolean;
     /** Non-consumable content has been successfully downloaded for this product */
     downloaded: boolean;
     /** Latest known expiry date for a subscription (a javascript Date) */
     expiryDate?: Date;
-    /** Localized introductory price (if applicable), with currency symbol */
+
+    /** Localized introductory price (if applicable), with currency symbol
+     *
+     * @deprecated Use pricingPhases instead */
     introPrice?: string;
-    /** Introductory price in micro-units, if applicable (divide by 1000000 to get numeric price) */
+    /** Introductory price in micro-units, if applicable (divide by 1000000 to get numeric price)
+     *
+     * @deprecated Use pricingPhases instead */
     introPriceMicros?: number;
-    /** Duration the introductory price is available (in period-unit) */
+    /** Duration the introductory price is available (in period-unit)
+     *
+     * @deprecated Use pricingPhases instead */
     introPricePeriod?: string;
-    /** Period for the introductory price ("Day", "Week", "Month" or "Year") */
+    /** Period for the introductory price ("Day", "Week", "Month" or "Year")
+     *
+     * @deprecated Use pricingPhases instead */
     introPricePeriodUnit?: IPeriodUnit;
-    /** Payment mode for the introductory price ("PayAsYouGo", "UpFront", or "FreeTrial") */
+    /** Duration of the introductory price in ISO 8601 (https://en.wikipedia.org/wiki/ISO_8601#Durations)
+     *
+     * @deprecated Use pricingPhases instead */
+    introPeriodISO?: string;
+    /** Payment mode for the introductory price ("PayAsYouGo", "UpFront", or "FreeTrial")
+     *
+     * @deprecated Use pricingPhases instead */
     introPricePaymentMode?: IPaymentMode;
+    /** Number of recurrence cycles for the introductory period (if introRecurrenceMode is FINITE_RECURRING)
+     *
+     * @deprecated Use pricingPhases instead */
+    introCycles?: number;
+    /** Mode of payment for the introductory period ("PayAsYouGo", "UpFront", or "FreeTrial")
+     *
+     * @deprecated Use pricingPhases instead */
+    introPaymentMode?: IPaymentMode;
+    /** Type of recurring payment for the introductory period
+     *
+     * @deprecated Use pricingPhases instead */
+    introRecurrenceMode?: RecurrenceMode;
+
     /** True when a trial or introductory price has been applied to a subscription.
-     * Only available after receipt validation. Only on iOS */
+     * Only available after receipt validation. Only on iOS. */
     ineligibleForIntroPrice?: boolean;
-    /** Latest date a subscription was renewed (a javascript Date) */
+    /** Latest date a subscription was renewed (a javascript Date)
+     * Only available after receipt validation. Only on iOS. */
     lastRenewalDate?: Date;
     /** Product has been loaded from server, however it can still be either valid or not */
     loaded: string | boolean;
     /** Product is owned */
     owned: boolean;
+    /** Human formatted price
+     *
+     * @deprecated Use pricingPhases instead */
     price: string;
-    /** Price in micro-units (divide by 1000000 to get numeric price) */
+    /** Price in micro-units (divide by 1000000 to get numeric price)
+     *
+     * @deprecated Use pricingPhases instead */
     priceMicros?: number;
+    /** Type of recurring payment
+     *
+     * @deprecated Use pricingPhases instead */
+    recurrenceMode?: RecurrenceMode;
     /** Current state the product is in (see life-cycle in the API documentatin). */
     state: StoreProductState;
     /** Localized name or short description, as loaded from the store */
     title: string;
     /** Latest transaction data for this product. */
     transaction: ITransaction;
-    /** Duration of the trial period for the subscription, in the units specified by the trialPeriodUnit property (windows only) */
+    /** Duration of the trial period for the subscription, in the units specified by the trialPeriodUnit property (windows only)
+     *
+     * @deprecated Use pricingPhases instead */
     trialPeriod?: number;
-    /** Units of the trial period for a subscription (windows only) */
+    /** Units of the trial period for a subscription (windows only)
+     *
+     * @deprecated Use pricingPhases instead */
     trialPeriodUnit?: IPeriodUnit;
     /** Product has been loaded and is a valid product.
      *
      * When product definitions can't be loaded from the store, you should display instead a warning like:
      * "You cannot make purchases at this stage. Try again in a moment. Make sure you didn't enable In-App-Purchases restrictions on your phone." */
     valid: boolean;
+
+    /** List of offers this product can be purchased from. This array contains identifiers for virtual products that you can access as you would for normal products, with `store.get(id)`. */
+    offers?: string[];
+
+    /** When the product is priced in different phases, this supersedes the pricing and period defined using the legacy fields. */
+    pricingPhases?: IPricingPhase[];
 
     /**
      * Call product.finish() to confirm to the store that an approved order has been delivered. This will change the product state from APPROVED to FINISHED (see life-cycle).
@@ -590,7 +689,7 @@ declare namespace IapStore {
     priceMicros: number;
     /** Number of subscription periods */
     period: number;
-    /** Unit of the subcription period ("Day", "Week", "Month" or "Year") */
+    /** Unit of the subscription period ("Day", "Week", "Month" or "Year") */
     periodUnit: IPeriodUnit;
     /** "PayAsYouGo", "UpFront", or "FreeTrial" */
     paymentMode: IPaymentMode;
@@ -598,6 +697,27 @@ declare namespace IapStore {
     eligible: boolean;
   }
 
+  /** Description of a phase for the pricing of a purchase.
+   *
+   * @see IStoreProduct.pricingPhases */
+  export interface IPricingPhase {
+    /** Price formatted for humans */
+    price: string;
+    /** Price in micro-units (divide by 1000000 to get numeric price) */
+    priceMicros: number;
+    /** Currency code */
+    currency?: string;
+    /** ISO 8601 duration of the period (https://en.wikipedia.org/wiki/ISO_8601#Durations) */
+    billingPeriod?: string;
+    /** Number of recurrence cycles (if recurrenceMode is FINITE_RECURRING) */
+    billingCycles?: number;
+    /** Type of recurring payment */
+    recurrenceMode?: RecurrenceMode;
+    /** Payment mode for the pricing phase ("PayAsYouGo", "UpFront", or "FreeTrial") */
+    paymentMode?: IPaymentMode;
+  }
+
+  /** Type of payment for a pricing phase */
   export type IPaymentMode = "PayAsYouGo" | "UpFront" | "FreeTrial";
 
   /**
@@ -668,4 +788,5 @@ declare namespace store {
     export type ITransaction = IapStore.ITransaction;
     export type IRegisterRequest = IapStore.IRegisterRequest;
     export type IStoreProduct = IapStore.IStoreProduct;
+    export type RecurrenceMode = IapStore.RecurrenceMode;
 }

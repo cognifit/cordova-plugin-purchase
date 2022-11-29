@@ -348,6 +348,12 @@ The `sandbox` property defines if you want to invoke the platform purchase sandb
 ### special purpose
 
     store.APPLICATION = "application";
+
+### recurrence modes
+
+    store.NON_RECURRING = "NON_RECURRING";
+    store.FINITE_RECURRING = "FINITE_RECURRING";
+    store.INFINITE_RECURRING = "INFINITE_RECURRING";
 ## <a name="product"></a>*store.Product* object ##
 
 Most events methods give you access to a `product` object.
@@ -389,8 +395,12 @@ Products object have the following fields and methods.
    - `eligible` - True if the user is deemed eligible for this discount by the platform
  - `product.downloading` - Product is downloading non-consumable content
  - `product.downloaded` - Non-consumable content has been successfully downloaded for this product
- - `product.additionalData` - additional data possibly required for product purchase
+ - `product.additionalData` - Additional data possibly required for product purchase
  - `product.transaction` - Latest transaction data for this product (see [transactions](#transactions)).
+- `product.offers` - List of offers available for purchasing a product.
+    - when not null, it contains an array of virtual product identifiers, you can fetch those virtual products as usual, with `store.get(id)`.
+- `product.pricingPhases` - Since v11, when a product is paid for in multiple phases (for example, trial followed by paid periods), this contains the list of phases.
+    - Example: [{"price":"€1.19","priceMicros":1190000,"currency":"EUR","billingPeriod":"P1W","billingCycles":0,"recurrenceMode":"INFINITE_RECURRING","paymentMode":"PayAsYouGo"}]
  - `product.expiryDate` - Latest known expiry date for a subscription (a javascript Date)
  - `product.lastRenewalDate` - Latest date a subscription was renewed (a javascript Date)
  - `product.billingPeriod` - Duration of the billing period for a subscription, in the units specified by the `billingPeriodUnit` property. (_not available on iOS < 11.2_)
@@ -1041,7 +1051,7 @@ Redeems a promotional offer from within the app.
    store.redeem();
 ```
 
-## <a name="launchPriceChangeConfirmationFlow"></a>*store.launchPriceChangeConfirmationFlow(callback)*
+## <a name="launchPriceChangeConfirmationFlow"></a>*store.launchPriceChangeConfirmationFlow(productId, callback)*
 
 Android only: display a generic dialog notifying the user of a subscription price change.
 
@@ -1052,9 +1062,10 @@ See https://developer.android.com/google/play/billing/subscriptions#price-change
 ##### example usage
 
 ```js
-   store.launchPriceChangeConfirmationFlow(function(status) {
+   store.launchPriceChangeConfirmationFlow(function('product_id', status) {
      if (status === "OK") { /* approved */ }
      if (status === "UserCanceled") { /* dialog canceled by user */ }
+     if (status === "UnknownProduct") { /* trying to update price of an unregistered product */ }
    }));
 ```
 ## *store.log* object
