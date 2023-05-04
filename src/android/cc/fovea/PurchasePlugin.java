@@ -67,6 +67,13 @@ public class PurchasePlugin
    */
   private CallbackContext mCallbackContext;
 
+  /**
+   * Context for the last plugin call to the getAvailableProducts method.
+   *
+   * See execute(), callSuccessOnGetAllProducts() and callErrorOnGetAllProducts().
+   */
+  private CallbackContext mGetAllProductsCallbackContext;
+
   /** A reference to BillingClient. */
   private BillingClient mBillingClient;
 
@@ -158,6 +165,8 @@ public class PurchasePlugin
         final List<String> subsSkus = parseStringArrayAtIndex(data, 3);
         init(billingKey, inAppSkus, subsSkus);
       } else if ("getAvailableProducts".equals(action)) {
+        this.mGetAllProductsCallbackContext = this.mCallbackContext;
+        this.mCallbackContext = null;
         getAvailableProducts();
       } else if ("getPurchases".equals(action)) {
         getPurchases();
@@ -480,7 +489,7 @@ public class PurchasePlugin
               final List<ProductDetails> productDetailsList) {
         if (result.getResponseCode() != BillingResponseCode.OK) {
           Log.d(mTag, "getAvailableProducts() -> Failed: " + format(result));
-          callError(Constants.ERR_LOAD, "Failed to load Products, code: "
+          callErrorOnGetAllProducts(Constants.ERR_LOAD, "Failed to load Products, code: "
                   + result.getResponseCode());
           return;
         }
@@ -491,10 +500,10 @@ public class PurchasePlugin
             jsonProductList.put(productDetailsToJson(product));
           }
           Log.d(mTag, "getAvailableProducts() -> Success");
-          callSuccess(jsonProductList);
+          callSuccessOnGetAllProducts(jsonProductList);
         } catch (JSONException e) {
           Log.d(mTag, "getAvailableProducts() -> Failed: " + e.getMessage());
-          callError(Constants.ERR_LOAD, e.getMessage());
+          callErrorOnGetAllProducts(Constants.ERR_LOAD, e.getMessage());
         }
       }
     });
@@ -1117,6 +1126,26 @@ public class PurchasePlugin
     }
     final CallbackContext callbackContext = mCallbackContext;
     mCallbackContext = null;
+    callbackContext.error(code + "|" + msg);
+  }
+
+  private void callSuccessOnGetAllProducts(final JSONArray array) {
+    if (mGetAllProductsCallbackContext == null) {
+      return;
+    }
+    final CallbackContext callbackContext = mGetAllProductsCallbackContext;
+
+    mGetAllProductsCallbackContext = null;
+    callbackContext.success(array);
+  }
+
+  private void callErrorOnGetAllProducts(final int code, final String msg) {
+    Log.d(mTag, "callError({code:" + code + ", msg:\"" + msg + "\")");
+    if (mGetAllProductsCallbackContext == null) {
+      return;
+    }
+    final CallbackContext callbackContext = mGetAllProductsCallbackContext;
+    mGetAllProductsCallbackContext = null;
     callbackContext.error(code + "|" + msg);
   }
 
