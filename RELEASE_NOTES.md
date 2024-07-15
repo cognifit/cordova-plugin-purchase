@@ -1,5 +1,738 @@
 # Release Notes - Cordova Plugin Purchase
 
+## 13.11
+
+### 13.11.1
+
+#### Fix running from browser with Capacitor
+
+Add `Utils.platformId()` helper function to get rid of an error when running a Capacitor app in a browser.
+
+Ref issue #1566
+
+### 13.11.0
+
+#### Upgrade to Google Play Billing library 7.0.0
+
+It's a backward compatible update, main visible change is the ProrationMode being renamed ReplacementMode (but the plugin kept the old enum and fields for compatibility).
+
+## 13.10
+
+### 13.10.4
+
+#### Fix build issue on android
+
+Java compiler started complaining about an implicit parameter. This patch fixes it.
+
+Ref issue #1564
+
+### 13.10.3
+
+#### Fix issue when a callback is null or undefined
+
+Ref issue #1557
+
+### 13.10.2
+
+#### Add `validationDate` to verified receipts
+
+`validationDate` can be set server side (the validation request response), to provide a more reliable clock time than the device's when needed.
+
+### 13.10.1
+
+#### Fix store.initialize() when passed a single value
+
+`store.initialize()` was supposed to work when passed a single value instead of an array. It turns out there was a regression, fixed with this release.
+
+#### Add store.when().initiated(transaction)
+
+Allows monitoring `INITIATED` (new) transactions.
+
+```ts
+store.when().initiated(transaction => {
+  // a new transaction has been initiated.
+});
+```
+
+### 13.10.0
+
+#### (googleplay) Add "isConsumed" to consumed transactions
+
+Local Google Play transaction now contain `isConsumed`, which is the same as `isAcknowledged`, but only set for consumable products.
+
+#### Make it easier to debug callback calls
+
+It's now possible to add a name to callbacks registered with "store.when()"
+
+When callbacks are triggered, the reason is logged to the console.
+
+#### Prevent instanciating CdvPurchase.store twice
+
+So when ionic packages the plugin with the app code, no double instantiations of the plugin is performed.
+
+## 13.9.0
+
+#### (appstore) store.restorePurchases() return potential errors
+
+The return value for `store.restorePurchases()` has been changed from `Promise<void>` to `Promise<IError|undefined>`.
+
+You can now inspect the value returned to figure out if processing complete with or without errors.
+
+#### (appstore) Fix forceReceiptReload
+
+In certain conditions (calls to `order` and `restorePurchases`), the AppStore adapter wants to force a refresh of the application receipt. This fix prevents it from returning the version cached in memory.
+
+## 13.8
+
+### 13.8.6
+
+#### Add CdvPurchase.Utils.platformName()
+
+Convert `CdvPurchase.Platform` enum values to a more user friendly version.
+
+Usage:
+
+```ts
+console.log(CdvPurchase.Utils.platformName(myTransaction.platform));
+
+// returns "App Store" or "Google Play" or "Braintree", ....
+```
+
+#### Increase expiry monitor's grace period on Google Play
+
+The 10 seconds wait before refreshing an expired subscription on Google Play wasn't enough: increased to 30 seconds.
+
+Ref #1468
+
+### 13.8.5
+
+Fixes for Apple AppStore's introductory periods and
+subscription renewals.
+
+#### Load products and receipts in parallel on Apple
+
+This solves the issue with processing the eligibility of
+introductory periods.
+
+#### Increase grace period for Apple subscription before refresh
+
+After observing that Apple sometime needs more than a
+minute before the API returns the subscription renewal
+transaction, we increased the local grace period (time
+before refresh) to 90 seconds.
+
+```ts
+CdvPurchase.Internal.ExpiryMonitor.GRACE_PERIOD_MS[Platform.APPLE_APPSTORE] = 90000;
+```
+
+### 13.8.4
+
+#### Trim product titles on Google Play
+
+Google Play returns the app name in parenthesis in product titles. The plugin
+now automatically trims it from the app name.
+
+This behavior can be disabled by setting:
+
+```ts
+CdvPurchase.GooglePlay.Adapter.trimProductTitles = false
+```
+
+#### Automatically re-validate just-expired subscriptions
+
+The plugin will now monitor active subscripion purchases (as returned by a
+receipt validation service) and re-validate the receipt automatically when the
+subscription expires or renews.
+
+You can customize the expiry monitor (which should rarely be needed):
+
+```ts
+// interval between checks in milliseconds
+CdvPurchase.Internal.ExpiryMonitor.INTERVAL_MS = 10000; // default: 10s
+
+// extra time before a subscription is considered expired (when re-validating
+// too early, sometime the new transaction isn't available yet).
+CdvPurchase.Internal.ExpiryMonitor.GRACE_PERIOD_MS = 10000; // default: 10s
+```
+
+#### Add expiry date to Test Adapter's subscription
+
+The expiry date was missing from the test product:
+
+```ts
+CdvPurchase.Test.testProducts.PAID_SUBSCRIPTION
+```
+
+### 13.8.3
+
+Fix npm package.
+
+### 13.8.2
+
+#### store.applicationUsername can return `undefined`
+
+If no user is logged in, you `applicationUsername` function can return
+undefined.
+
+#### Add "productId" and "platform" to Error objects
+
+All errors now include the "platform" and "productId" field (when applicable),
+to get more context.
+
+### 13.8.1
+
+#### Fix AppStore eligibility determination of intro period
+
+In the case where the StoreKit SDK doesn't return a "discounts" array,
+determining the eligility of the intro period using iaptic was not functional.
+
+### 13.8.0
+
+#### Upgrade to Google Play Billing library 5.2.1
+
+Adds access to offer and base plan identifiers.
+
+#### Handle validator answer with code `VALIDATOR_SUBSCRIPTION_EXPIRED`
+
+For backward compatibility, the validator also support responses with a 6778003
+error code (expired) when the validated transaction is expired.
+
+#### Fix: AppStore adapter should only return a localReceipt on iOS
+
+A dummy appstore receipt was listed on other platforms, this is fixed.
+
+#### Prevent various issues
+
+**Prevent double calls to approved callbacks**
+
+Make sure `.approved()` is only called once during a small time frame.
+
+**Skip quick successive calls to store.update()**
+
+The update will be performed only if `store.update()` or `store.initialize()`
+was called less than `store.minTimeBetweenUpdates` milliseconds.
+
+This make it safer to always call `store.update()` when entering the app's
+Store screen.
+
+**Block double callback registrations**
+
+Throw an error when attempting the re-register an existing callback for a given
+event handler. This is indicative of initialization code being run more than
+once.
+
+## 13.7.0
+
+#### Fix AppStore introctory prices
+
+Fix a regression with introctory prices on iOS. Unclear when this happened,
+according to Apple documentation, the "discounts" array should contain the
+introctory prices, but it turns out it does not anymore.
+
+#### Set ES6 as minimal javascript version
+
+Down from ES2015, for broader compatibility.
+
+#### Ensure verify() resolves even if there's no validator
+
+Some user do not specify a receipt validator but want to call
+"transaction.verify()" (for example app building frameworks).
+
+This changes makes sure the behavior gets back like it used to be in earlier
+versions of the plugin.
+
+## 13.6
+
+### 13.6.0
+
+#### Add store.when().receiptsReady(cb)
+
+The "receiptsReady" event is triggered only once, as soon as all platforms are
+done loading the receipts from the SDK.
+
+It can be used by applications that do not rely on receipt validation, in order
+to wait for the list of purchases reported by the native SDK to have been
+processed. For example, before running some code that check products ownership
+statuses at startup.
+
+```ts
+// at startup
+CdvPurchase.store.when().receiptsReady(() => {
+  console.log('All platforms have loaded their local receipts');
+  console.log('Feature X: ' + CdvPurchase.store.get('unlock-feature-x').owned);
+});
+```
+
+If the receipts have already been loaded before you setup this event handler,
+it will be called immediately.
+
+Users using a receipt validation server should rely on receiptsVerified()
+instead (see below).
+
+#### Add store.when().receiptsVerified(cb)
+
+Similarly to "receiptsReady", "receiptsVerified" is triggered only once: after
+all platforms have loaded their receipts and those have been verified by the
+receipt validation server.
+
+It can be used by applications that DO rely on receipt validation, in order to
+wait for all receipts to have been processed by the receipt validation service.
+A good use case is to encapsulate startup code that check products ownership
+status.
+
+```ts
+// at startup
+CdvPurchase.store.when().receiptsVerified(() => {
+  console.log('Receipts have been validated');
+  if (CdvPurchase.store.get('monthly').owned) {
+    openMainScreen();
+  }
+  else {
+    openSubscriptionScreen();
+  }
+});
+```
+
+If the receipts have already been verified before you setup this event handler,
+it will be called immediately.
+
+#### Add store.when().pending(cb)
+
+This event handler can be notified when a transaction enters the "PENDING"
+state, which happens when a user has "Ask to Buy" enabled, or in country where
+cash payment is an option.
+
+```ts
+store.when().pending(transaction => {
+  // Transaction is pending (waiting for parent approval, cash payment, ...)
+});
+```
+
+#### Remove autogrouping of products
+
+Starting at version 13.4.0, products were automatically added to the "default"
+group. This created more issues than it solved, because it let the plugin
+automatically try to replace potentially unrelated products.
+
+People willing to rely on automatic subscription replacement on Android should
+explicitely set those product's `group` property when registering them. Or
+should use the `oldPurchaseToken` property when making an order.
+
+**Examples:**
+
+```ts
+// Replace an old purchase when finalizing the new one on google play.
+store.order(product, {
+  googlePlay: {
+    oldPurchaseToken: 'abcdefghijkl',
+    prorationMode: CdvPurchase.GooglePlay.ProrationMode.IMMEDIATE_AND_CHARGE_PRORATED_PRICE,
+  }
+});
+
+// For those 2 subscription products, the plugin will automatically replace
+// the currently owned one (if any) when placing a new order.
+store.register([{
+  id: 'no_ads_yearly',
+  type: ProductType.PAID_SUBSCRIPTION,
+  platform: Platform.GOOGLE_PLAY,
+  group: 'noAds'
+}, {
+  id: 'no_ads_monthly',
+  type: ProductType.PAID_SUBSCRIPTION,
+  platform: Platform.GOOGLE_PLAY,
+  group: 'noAds'
+}]);
+```
+
+## 13.5
+
+### 13.5.0 - Add timeout to validation requests
+
+By default, the plugin will now setup a 20 seconds timeout for receipt validation requests.
+
+Receipt validation timeout can be detected using the following code:
+
+```ts
+CdvPurchase.store.when().unverified(function(response) {
+  if (response.payload.code === CdvPurchase.ErrorCode.COMMUNICATION) {
+    if (response.payload.status === CdvPurchase.Utils.Ajax.HTTP_REQUEST_TIMEOUT) {
+      // request timeout
+    }
+  }
+});
+```
+
+The value for timeout can be customized by specifying the validator this way:
+
+```ts
+CdvPurchase.store.validator = {
+  url: 'https://validator.iaptic.com',
+  timeout: 30000, // in milliseconds
+}
+```
+
+## 13.4
+
+### 13.4.3 - Add HTTP status to receipt validation error payload
+
+Let the app know the HTTP status for a failed receipt validation call, in "response.payload.status".
+
+```ts
+CdvPurchase.store.when().unverified(response => {
+    if (response.payload.code === CdvPurchase.ErrorCode.COMMUNICATION) {
+        console.log("HTTP ERROR: " + response.payload.status);
+    }
+});
+```
+
+### 13.4.2 - Fix "owned" status when validator returns "isExpired"
+
+Attempt to fix issue #1406 on iOS, with Ionic v6: `applicationUsername` isn't attached to purchase, it seems like this is due to strings passed as a subclass of NSString on this platform.
+
+### 13.4.1 - Fix "owned" status when validator returns "isExpired"
+
+Issue #1408 fixed. If the validator returns `isExpired`, the `owned()` method was returning an incorrect result.
+
+### 13.4.0 - Product groups and Google Play
+
+Products are now part of the `"default"` group when none is provided, as per the documentation. This is used on Google Play to automatically replace existing subscription by the newly ordered one.
+
+This update can break your app if you have multiple **independent** subscription products on Google Play, as purchasing a subscription product will now cancel any existing one by default.
+
+Use the `group` property in `store.register` to force legacy subscription products to be part of different groups.
+
+## 13.3
+
+Adding back functionalities that existed in version 11 of the plugin, mostly on iOS, and a few fixes. Detail below.
+
+### 13.3.3 - Use canMakePayments on Apple AppStore
+
+`offer.canPurchase` will be false if the platform reports that it doesn't support the "order" functionality.
+
+When you check if the offer can be purchased, the plugin will now use the value from `canMakePurchases` (for Apple AppStore).
+
+```ts
+if (!offer.canPurchase) {
+  // the given offer cannot be purchased. hide it or hide the buy button.
+}
+```
+
+If none of the offers can be purchased, you can choose to hide the whole store.
+
+There are 2 reasons why an offer cannot be purchased:
+
+1. Product is already owned (see `product.owned`)
+2. The adapter don't support "order()"
+
+If you really want to access the low-level value of `canMakePurchases` you can do it like so:
+
+```
+const appStore = store.getAdapter(CdvPurchase.Platform.APPLE_APPSTORE);
+if (appStore && appStore.checkSupport('order')) {
+  // user can make payments
+}
+```
+
+Ref #1378
+
+### 13.3.2 - Add support for promotional offers on Apple AppStore
+
+You can order a discount offer by providing additional data to "offer.order()" like so:
+
+```ts
+offer.order({
+  appStore: {
+    discount: {
+      id: "discount-id",
+      key: "...",
+      nonce: "...",
+      signature: "...",
+      timestamp: "...",
+    }
+  }
+});
+```
+
+Check Apple documentation about the meaning of those fields and how to fill them. https://developer.apple.com/documentation/storekit/in-app_purchase/original_api_for_in-app_purchase/subscriptions_and_offers/setting_up_promotional_offers?language=objc
+
+You can check this old example server here: https://github.com/j3k0/nodejs-suboffer-signature-server
+
+### 13.3.1 - Fix "store.order" promise resolution
+
+Wait for the transaction to be purchased or the purchase cancelled before resolving.
+
+Example usage:
+
+```ts
+store.order(offer)
+  .then((result) => {
+    if (result && result.isError) {
+      if (result.code === CdvPurchase.ErrorCode.PAYMENT_CANCELLED) {
+        // Payment cancelled: window closed by user
+      }
+      else {
+        // Payment failed: check result.message
+      }
+    }
+    else {
+      // Success
+    }
+  });
+```
+
+### 13.3.0
+
+#### Add the AppStore `autoFinish` option
+
+Use this if the transaction queue is filled with unwanted transactions (in development).
+It's safe to keep this option to "true" when using a receipt validation server and you only sell subscriptions
+
+Example:
+
+```ts
+store.initialize([
+  {
+    platform: Platform.APPLE_APPSTORE,
+    options: { autoFinish: true }
+  },
+  Platform.GOOGLE_PLAY
+]);
+```
+
+#### Optimize AppStore receipt loaded multiple times in parallel
+
+When the Apple `appStoreReceipt` is loaded from multiple source, it resulted in a lot of duplicate calls. 13.3.0 optimizes this use case.
+
+#### Add transactionId and purchaseId to VerifiedPurchase
+
+It's just a TypeScript definition since the plugin doesn't do much with it, but it has been requested by a few users.
+
+## 13.2
+
+### 13.2.1 - Fixing parsing of incorrectly formatted validator response
+
+### 13.2.0
+
+#### Adding store.when().unverified()
+
+`unverified` will be called when receipt validation failed.
+
+#### Fixing `Product.pricing`
+
+Issue #1368 fixed: `product.pricing` was always `undefined`.
+
+## 13.1
+
+### 13.1.6 - Fixing `appStoreReceipt` null on first launch
+
+Bug hasn't been reproduced, but the fix should handle the error case that happened to this user (based on the provided logs).
+
+### 13.1.5 - AppStore fixes
+
+- 51400ab Adding in-progress transaction to a pseudo receipt
+- c0e47b3 Reloading receipt from native side before receipt validation
+- 5a8542b Improved error reporting
+- 7a80a6d Do not call "finished" for failed transactions
+- 348431e Report success/failure of purchase
+- e53017c Fix crash when logged out of iCloud (#1354)
+
+### 13.1.4 - AppStore fixes
+
+* b692e21 Don't error if finishing already finished transaction
+* 49c0508 Force receipt refresh after order() and restorePurchases()
+
+### 13.1.3
+
+Fixing some receipt validation use cases on Apple devices.
+
+* 9cfce2d Load missing iOS appStoreReceipt when validation call is requested
+* 2569147 Update validator functions to include the receipts
+* f03a751 Refresh appStoreReceipt if empty at validation stage
+
+### Update to requestPayment()
+
+In the payment request, the `items` array now replace the `productIds` array. Use this array to define the list of items the user is paying for. For example:
+
+```ts
+CdvPurchase.store.requestPayment({
+  platform: CdvPurchase.Platform.BRAINTREE,
+  amountMicros: 11000000,
+  currency: 'USD',
+  items: [{
+    id: 'margherita_large',
+    title: 'Pizza Margherita Large',
+    pricing: {
+      priceMicros: 10000000,
+    }
+  }, {
+    id: 'delivery_standard',
+    title: 'Delivery',
+    pricing: {
+      priceMicros: 1000000,
+    }
+  }]
+});
+```
+
+The format for items makes them compatible with products loaded from the stores. You can then manage your inventory on Google Play but allow payment for those Google Play products using Braintree:
+
+```ts
+store.register([{
+  id: 'five_tokens',
+  type: ProductType.CONSUMABLE
+  platform: Platform.GOOGLE_PLAY,
+}]);
+
+// Later on...
+store.requestPayment({
+  platform: CdvPurchase.Platform.BRAINTREE,
+  amountMicros: 11000000,
+  currency: 'USD',
+  items: [store.get('five_tokens')],
+});
+```
+
+See [PaymentRequest](https://github.com/j3k0/cordova-plugin-purchase/blob/master/api/interfaces/CdvPurchase.PaymentRequest.md) and [PaymentRequestItem](https://github.com/j3k0/cordova-plugin-purchase/blob/master/api/interfaces/CdvPurchase.PaymentRequestItem.md) for details.
+
+### Fixes for Braintree.requestPayment()
+
+Bug fixes:
+
+* Properly using the provided `applePayOptions`
+* Detecting payment request cancellations by user
+
+### requestPayment() amount computed from items
+
+If the amount is not provided in a payment request, it will be computed as the sum of all items.
+
+Currency will also be retrieved from the items when missing.
+
+## 13.0
+
+This is a full rewrite of the API, updated to allow:
+
+ * using multiple payment processors in parallel
+ * exposing multiple offers for a single product and complex pricing
+ * exposing purchases from receipts (either local receipts or verified from a server)
+ * placing custom payment requests
+
+All JavaScript code has being rewritten in TypeScript, typings are now 100% complete and accurate.
+
+If you're upgrading from an earlier version, check the [migration guide](https://github.com/j3k0/cordova-plugin-purchase/wiki/HOWTO:-Migrate-to-v13).
+
+The native code is built using version 12 as starting point, so all features from version 12 are available as well.
+
+### Braintree
+
+This version introduces support for Braintree as a payment processor, it requires an additional plugin to add the libraries to your project: https://github.com/j3k0/cordova-plugin-purchase-braintree
+
+The Braintree integration supports payment with 3DSecure and Apple Pay.
+
+### Windows Store
+
+Support for payments on Windows Store has been dropped. It will be back in a later version.
+
+### Overview
+
+The new API separates the different concepts with their own first-level entities:
+
+- Products
+- Offers
+- Receipts
+- Transactions
+
+**Products / Offers** will contain the definition of what's available to the user to purchase.
+
+**Receipts / Transactions** will contain details about what the user has purchased.
+
+In the new API, it is possible to initiate transactions not necessarily linked with a product (using payment processors like Braintree).
+
+It defines a generic Adapter interface, implemented by the various payment platforms. The core of the plugin controls and monitors the different active adapters and expose the unified API. Previously, we basically had an iOS implementation of the unified API (using StoreKit), an android implementation, etc... Now, many adapters can coexist in peace.
+
+## 12.0.0
+
+This was a first attempt to port the code to billing library v5. It's not recommended to use this version as, trying to keep the API backward compatible, made it messy and bug prone. Use version 13.
+
+### Upgrade to Google Play Billing library v5.0
+
+With the upgrade to Google Play Billing library v5.0, many things will changes related to subscriptions, most importantly with the introduction of "subscription offers" and "pricing phases".
+
+**Receipt validations**
+
+Note that, at the time of writing this, validating purchases made with the Google Play Billing library v5.0 required the use the the SubscriptionV2 API. This API is already supported by [iaptic](https://www.iaptic.com/), the successor to Fovea's receipt validation service, so it might be a good option if you do not want to implement this new API.
+
+### (Google Play) `store.launchPriceChangeConfirmationFlow` - Update
+
+With Google Play, `store.launchPriceChangeConfirmationFlow(productId, callback)` is now the same as calling `store.manageSubscription()`. The underlying method provided by Google has been removed: https://developer.android.com/reference/com/android/billingclient/api/PriceChangeFlowParams - A deep link to the subscription management page on Google Play is now the newly recommended method.
+
+### NEW: `product.offers` - Subscription Offers support
+
+A single subscription product can now be purchased with different offers. See https://developer.android.com/google/play/billing/subscriptions
+
+To enable this new feature in a backward compatible way, the plugin will generate one product for each offer.
+
+The generated products will have all the attributes of a legacy subscription product, with those noticeable values:
+
+ * `id`: `PARENT_PRODUCT_ID@OFFER_TOKEN`.
+ * `group`: `PARENT_PRODUCT_ID`.
+
+The parent product will have an `offers` attributes. It's an array of strings containing the identifiers for all offers available to the user.
+
+You can get the information for those offers with `store.get(offerId)`, they are represented as virtual products.
+
+### NEW: `product.pricingPhases` - Flexible Pricing Phases support
+
+Google now allows more flexible pricing in multiple phases. While it's currently limited to 2 phases, the API doesn't really impose that limitation.
+
+To reflect this, the plugin now include prices in the `product.pricingPhases` attribute. It's an array of phases, with various costs, durations and recurrence modes. When present, this supersedes the legacy way of including prices and durations.
+
+Here is the newly defined type:
+
+```typescript
+/** Description of a phase for the pricing of a purchase. */
+export interface IPricingPhase {
+   /** Price formatted for humans */
+   price: string;
+   /** Price in micro-units (divide by 1000000 to get numeric price) */
+   priceMicros: number;
+   /** Currency code */
+   currency?: string;
+   /** ISO 8601 duration of the period (https://en.wikipedia.org/wiki/ISO_8601#Durations) */
+   billingPeriod?: string;
+   /** Number of recurrence cycles (if recurrenceMode is FINITE_RECURRING) */
+   billingCycles?: number;
+   /** Type of recurring payment */
+   recurrenceMode?: RecurrenceMode;
+   /** Payment mode for the pricing phase ("PayAsYouGo", "UpFront", or "FreeTrial") */
+   paymentMode?: IPaymentMode;
+}
+
+/**
+ * Type of recurring payment
+ *
+ * - FINITE_RECURRING: Payment recurs for a fixed number of billing period set in `paymentPhase.cycles`.
+ * - INFINITE_RECURRING: Payment recurs for infinite billing periods unless cancelled.
+ * - NON_RECURRING: A one time charge that does not repeat.
+ */
+export type RecurrenceMode = "NON_RECURRING" | "FINITE_RECURRING" | "INFINITE_RECURRING";
+```
+
+You can also keep the plugin in `v11` compatibility mode using `store.compatibility = 11` (or lower), in which case the legacy "introPrice", "billingPeriod" and such will be filled using the content of the pricingPhases array. Notice that this legacy mode can only support **at most** 2 pricing phases.
+
+When in `v11` compatibility mode:
+
+ - prices and billing periods will be set using values from the last of the pricing phases.
+ - intro prices and billing periods will be set with the values from the first pricing phase (if there are more than one)
+ - product prices and billing periods will be set using values from the first offer for that product.
+
+### NEW: `store.compatibility` - Legacy compatibility
+
+Let the plugin operate in compatibility mode by filling in deprecated fields. By default, the plugin does not attempt to work in compatibility mode.
+
+* Anything lower than `12` will use the legacy product price definition instead of the more generic `offers` property.
+* Anything lower than `10` will use the old names for intro period period definitions.
+
+**NOTE**: the plugin might not be able to describe all Google Play subscription plans in compatibility mode (when non backward-compatible pricing modes are being used, for instance if there are more than 2 pricing phases).
 
 ## 11.0.0
 
